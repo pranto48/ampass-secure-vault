@@ -1,0 +1,3 @@
+# SECURITY: Deny all access to database directory
+Order deny,allow
+Deny from all

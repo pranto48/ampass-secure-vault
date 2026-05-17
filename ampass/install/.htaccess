@@ -1,0 +1,16 @@
+# AMPass Installer Protection
+# This file provides an additional layer of security.
+# After installation, DELETE the entire /install/ directory.
+
+# If the install lock file exists, deny all access
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{DOCUMENT_ROOT}/../config/.install_lock -f
+    RewriteRule ^ - [F,L]
+</IfModule>
+
+# Block all file types except the installer itself
+<FilesMatch "^(?!index\.php$)">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
