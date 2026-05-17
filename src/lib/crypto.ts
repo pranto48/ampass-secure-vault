@@ -11,18 +11,18 @@ export const b64 = {
     for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i]);
     return btoa(bin);
   },
-  decode(s: string): Uint8Array {
+  decode(s: string): ArrayBuffer {
     const bin = atob(s);
     const out = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-    return out;
+    return out.buffer;
   },
 };
 
-export function randomBytes(n: number): Uint8Array {
+export function randomBytes(n: number): ArrayBuffer {
   const a = new Uint8Array(n);
   crypto.getRandomValues(a);
-  return a;
+  return a.buffer;
 }
 
 export const PBKDF2_ITERATIONS = 250_000;
