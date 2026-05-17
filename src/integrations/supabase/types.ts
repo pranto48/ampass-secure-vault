@@ -14,16 +14,274 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      app_settings: {
+        Row: {
+          key: string
+          updated_at: string
+          value: Json
+        }
+        Insert: {
+          key: string
+          updated_at?: string
+          value: Json
+        }
+        Update: {
+          key?: string
+          updated_at?: string
+          value?: Json
+        }
+        Relationships: []
+      }
+      audit_logs: {
+        Row: {
+          action: string
+          created_at: string
+          id: string
+          metadata: Json
+          target_id: string | null
+          user_id: string | null
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          id?: string
+          metadata?: Json
+          target_id?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          id?: string
+          metadata?: Json
+          target_id?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      folders: {
+        Row: {
+          color: string
+          created_at: string
+          id: string
+          name: string
+          user_id: string
+        }
+        Insert: {
+          color?: string
+          created_at?: string
+          id?: string
+          name: string
+          user_id: string
+        }
+        Update: {
+          color?: string
+          created_at?: string
+          id?: string
+          name?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          email: string
+          full_name: string | null
+          id: string
+          updated_at: string
+          username: string | null
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          full_name?: string | null
+          id: string
+          updated_at?: string
+          username?: string | null
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          full_name?: string | null
+          id?: string
+          updated_at?: string
+          username?: string | null
+        }
+        Relationships: []
+      }
+      shared_items: {
+        Row: {
+          created_at: string
+          id: string
+          item_id: string
+          owner_id: string
+          permission: string
+          revoked: boolean
+          shared_with_id: string
+          wrapped_item_key: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          item_id: string
+          owner_id: string
+          permission?: string
+          revoked?: boolean
+          shared_with_id: string
+          wrapped_item_key: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          item_id?: string
+          owner_id?: string
+          permission?: string
+          revoked?: boolean
+          shared_with_id?: string
+          wrapped_item_key?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shared_items_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "vault_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_roles: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_security: {
+        Row: {
+          created_at: string
+          kdf_iterations: number
+          kdf_salt: string
+          public_key: string | null
+          updated_at: string
+          user_id: string
+          verifier_ciphertext: string
+          verifier_iv: string
+          wrapped_private_key: string | null
+          wrapped_private_key_iv: string | null
+          wrapped_vault_key: string
+          wrapped_vault_key_iv: string
+        }
+        Insert: {
+          created_at?: string
+          kdf_iterations?: number
+          kdf_salt: string
+          public_key?: string | null
+          updated_at?: string
+          user_id: string
+          verifier_ciphertext: string
+          verifier_iv: string
+          wrapped_private_key?: string | null
+          wrapped_private_key_iv?: string | null
+          wrapped_vault_key: string
+          wrapped_vault_key_iv: string
+        }
+        Update: {
+          created_at?: string
+          kdf_iterations?: number
+          kdf_salt?: string
+          public_key?: string | null
+          updated_at?: string
+          user_id?: string
+          verifier_ciphertext?: string
+          verifier_iv?: string
+          wrapped_private_key?: string | null
+          wrapped_private_key_iv?: string | null
+          wrapped_vault_key?: string
+          wrapped_vault_key_iv?: string
+        }
+        Relationships: []
+      }
+      vault_items: {
+        Row: {
+          ciphertext: string
+          created_at: string
+          favorite: boolean
+          folder_id: string | null
+          id: string
+          item_type: string
+          iv: string
+          last_used_at: string | null
+          tags: string[]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          ciphertext: string
+          created_at?: string
+          favorite?: boolean
+          folder_id?: string | null
+          id?: string
+          item_type?: string
+          iv: string
+          last_used_at?: string | null
+          tags?: string[]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          ciphertext?: string
+          created_at?: string
+          favorite?: boolean
+          folder_id?: string | null
+          id?: string
+          item_type?: string
+          iv?: string
+          last_used_at?: string | null
+          tags?: string[]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vault_items_folder_id_fkey"
+            columns: ["folder_id"]
+            isOneToOne: false
+            referencedRelation: "folders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "user"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +408,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "user"],
+    },
   },
 } as const
