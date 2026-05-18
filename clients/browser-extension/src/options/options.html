@@ -75,6 +75,21 @@
       </div>
     </section>
 
+    <!-- Desktop App Bridge -->
+    <section class="card">
+      <h2>Desktop App Bridge</h2>
+      <div class="form-group">
+        <label class="check-label">
+          <input type="checkbox" id="useDesktopBridge">
+          <span>Use AMPass desktop app for vault operations (optional)</span>
+        </label>
+        <p class="hint">When enabled, the extension communicates with the installed AMPass desktop app via native messaging. The desktop app must be running and unlocked. If unavailable, falls back to server API.</p>
+      </div>
+      <div class="form-group">
+        <p class="hint" id="bridgeStatus">Status: Not tested</p>
+      </div>
+    </section>
+
     <!-- Theme -->
     <section class="card">
       <h2>Appearance</h2>

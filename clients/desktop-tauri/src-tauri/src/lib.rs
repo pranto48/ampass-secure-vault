@@ -11,6 +11,7 @@ mod storage;
 mod tray;
 mod lock;
 mod backup;
+pub mod native_messaging;
 
 use std::sync::Mutex;
 use tauri::Manager;

@@ -10,7 +10,8 @@ importScripts(
   '../shared/domain-utils.js',
   '../shared/crypto-client.js',
   '../shared/api-client.js',
-  '../shared/password-generator.js'
+  '../shared/password-generator.js',
+  '../shared/native-client.js'
 );
 
 // ===== State =====

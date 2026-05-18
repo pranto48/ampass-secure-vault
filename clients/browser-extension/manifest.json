@@ -8,8 +8,10 @@
     "activeTab",
     "scripting",
     "clipboardWrite",
-    "alarms"
+    "alarms",
+    "nativeMessaging"
   ],
+  "optional_permissions": [],
   "host_permissions": [],
   "background": {
     "service_worker": "src/background/service-worker.js"

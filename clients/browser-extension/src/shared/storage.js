@@ -80,7 +80,8 @@ const Storage = {
       clipboardClearSeconds: 30,
       lockTimeoutMinutes: 15,
       theme: 'system',
-      allowHttpAutofill: false
+      allowHttpAutofill: false,
+      useDesktopBridge: false
     };
     const stored = await this.getLocal('settings');
     return { ...defaults, ...(stored || {}) };

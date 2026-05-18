@@ -89,6 +89,22 @@
     if (status.serverUrl && !status.serverUrl.startsWith('https://') && !status.serverUrl.includes('localhost')) {
       showStatus('⚠️ Server is not using HTTPS. Your data may be at risk.', 'warning');
     }
+
+    // Check native bridge connection
+    checkBridgeStatus();
+  }
+
+  async function checkBridgeStatus() {
+    const indicator = document.getElementById('bridgeIndicator');
+    try {
+      const available = await NativeClient.isAvailable();
+      if (available) {
+        indicator.style.display = 'block';
+        indicator.title = 'Connected to AMPass Desktop App';
+      }
+    } catch (e) {
+      // Bridge not available — that's fine, it's optional
+    }
   }
 
   // ===== Setup =====
