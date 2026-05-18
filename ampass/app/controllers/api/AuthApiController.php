@@ -124,4 +124,72 @@ class AuthApiController {
         AuditLog::log('vault_locked', $userId, null, null, ['method' => 'api']);
         echo json_encode(['success' => true]);
     }
+
+    /**
+     * POST /api/auth/initVaultKey - Initialize vault encryption key (first-time setup)
+     * SECURITY: Called once when user's vault has not been initialized.
+     * Accepts the encrypted vault key (encrypted client-side with master password).
+     * The server NEVER sees the raw vault key.
+     */
+    public function initVaultKey(): void {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            http_response_code(405);
+            echo json_encode(['error' => 'Method not allowed']);
+            return;
+        }
+
+        CSRF::validateOrFail($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '');
+
+        if (!Session::isLoggedIn()) {
+            http_response_code(401);
+            echo json_encode(['error' => 'Not authenticated']);
+            return;
+        }
+
+        $userId = Session::getUserId();
+
+        // Verify vault actually needs initialization
+        $security = UserSecurity::findByUserId($userId);
+        if (!$security || ($security['key_iterations'] > 0 && $security['encrypted_vault_key'] !== 'VAULT_NOT_INITIALIZED')) {
+            http_response_code(400);
+            echo json_encode(['error' => 'Vault is already initialized']);
+            return;
+        }
+
+        $input = json_decode(file_get_contents('php://input'), true);
+        if (!$input || !is_array($input)) {
+            http_response_code(400);
+            echo json_encode(['error' => 'Invalid request body']);
+            return;
+        }
+
+        $salt = $input['encryption_salt'] ?? '';
+        $encryptedKey = $input['encrypted_vault_key'] ?? '';
+        $iv = $input['vault_key_iv'] ?? '';
+        $iterations = (int)($input['key_iterations'] ?? 100000);
+
+        if (empty($salt) || empty($encryptedKey) || empty($iv)) {
+            http_response_code(400);
+            echo json_encode(['error' => 'encryption_salt, encrypted_vault_key, and vault_key_iv are required']);
+            return;
+        }
+
+        if ($iterations < 10000 || $iterations > 1000000) {
+            http_response_code(400);
+            echo json_encode(['error' => 'Invalid key_iterations']);
+            return;
+        }
+
+        // Update the user_security record with real encrypted vault key
+        UserSecurity::updateVaultKey($userId, [
+            'master_password_hash' => $security['master_password_hash'],
+            'encryption_salt' => $salt,
+            'encrypted_vault_key' => $encryptedKey,
+            'vault_key_iv' => $iv,
+            'key_iterations' => $iterations
+        ]);
+
+        AuditLog::log('vault_initialized', $userId);
+        echo json_encode(['success' => true, 'message' => 'Vault key initialized']);
+    }
 }

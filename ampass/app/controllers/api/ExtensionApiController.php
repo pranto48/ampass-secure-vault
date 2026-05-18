@@ -245,7 +245,8 @@ class ExtensionApiController {
                 'full_name' => $user['full_name'],
                 'email' => $user['email']
             ],
-            'derivation_params' => $derivationParams
+            'derivation_params' => $derivationParams,
+            'hmac_key' => substr(APP_SECRET, 0, 32)
         ]);
     }
 
@@ -292,6 +293,71 @@ class ExtensionApiController {
     // ================================================================
     // VAULT ENDPOINTS (all require auth + rate limiting)
     // ================================================================
+
+    /**
+     * POST /api/extension/vault/init-key
+     * Initialize vault encryption key for first-time setup.
+     * SECURITY: Only accepts encrypted vault key data. The server never sees the raw vault key.
+     * Called once when a user's vault has not been initialized (key_iterations = 0).
+     */
+    public function vaultInitKey(): void {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            http_response_code(405);
+            echo json_encode(['error' => 'Method not allowed']);
+            return;
+        }
+
+        if (!$this->requireAuth()) return;
+        if (!$this->rateLimit('vault_init', 5, 300)) return;
+
+        $input = json_decode(file_get_contents('php://input'), true);
+        if (!$input || !is_array($input)) {
+            http_response_code(400);
+            echo json_encode(['error' => 'Invalid request body']);
+            return;
+        }
+
+        $salt = $input['encryption_salt'] ?? '';
+        $encryptedKey = $input['encrypted_vault_key'] ?? '';
+        $iv = $input['vault_key_iv'] ?? '';
+        $iterations = (int)($input['key_iterations'] ?? 100000);
+
+        // Validate inputs
+        if (empty($salt) || empty($encryptedKey) || empty($iv)) {
+            http_response_code(400);
+            echo json_encode(['error' => 'encryption_salt, encrypted_vault_key, and vault_key_iv are required']);
+            return;
+        }
+        if (!preg_match('/^[a-f0-9]+$/', $salt) || !preg_match('/^[a-f0-9]+$/', $iv)) {
+            http_response_code(400);
+            echo json_encode(['error' => 'Salt and IV must be hex-encoded']);
+            return;
+        }
+        if ($iterations < 10000 || $iterations > 1000000) {
+            http_response_code(400);
+            echo json_encode(['error' => 'Invalid key_iterations value']);
+            return;
+        }
+
+        // Update user_security record
+        $updated = UserSecurity::updateVaultKey($this->userId, [
+            'master_password_hash' => Database::fetchOne(
+                "SELECT master_password_hash FROM user_security WHERE user_id = ?", [$this->userId]
+            )['master_password_hash'] ?? '',
+            'encryption_salt' => $salt,
+            'encrypted_vault_key' => $encryptedKey,
+            'vault_key_iv' => $iv,
+            'key_iterations' => $iterations
+        ]);
+
+        if ($updated) {
+            ExtensionAudit::log('vault_initialized', $this->userId, $this->deviceId);
+            echo json_encode(['success' => true, 'message' => 'Vault key initialized']);
+        } else {
+            http_response_code(500);
+            echo json_encode(['error' => 'Failed to initialize vault key']);
+        }
+    }
 
     /**
      * GET /api/extension/vault/list

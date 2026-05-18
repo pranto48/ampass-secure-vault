@@ -92,6 +92,10 @@ async function login(payload) {
   await Storage.setToken(result.token);
   await Storage.setDerivationParams(result.derivation_params);
   await Storage.setSession('user', result.user);
+  // Store HMAC key for url_hash/title_hash computation
+  if (result.hmac_key) {
+    await Storage.setSession('hmacKey', result.hmac_key);
+  }
 
   return { success: true, user: result.user, needsUnlock: true };
 }
@@ -101,9 +105,18 @@ async function unlock(payload) {
   const params = await Storage.getDerivationParams();
   if (!params) throw new Error('Not authenticated. Please login first.');
 
-  // Derive vault key locally
-  const vaultKeyHex = await CryptoClient.unlockVault(masterPassword, params);
-  await Storage.setVaultKey(vaultKeyHex);
+  // Check if vault needs first-time initialization
+  if (params.needs_setup || params.key_iterations === 0 || params.encrypted_vault_key === 'VAULT_NOT_INITIALIZED') {
+    // First-time vault setup: generate a new vault key and encrypt it with the master password
+    const setupResult = await initializeVault(masterPassword, params);
+    await Storage.setVaultKey(setupResult.vaultKeyHex);
+    // Update derivation params in session with the real values
+    await Storage.setDerivationParams(setupResult.newParams);
+  } else {
+    // Normal unlock: derive wrapping key and decrypt existing vault key
+    const vaultKeyHex = await CryptoClient.unlockVault(masterPassword, params);
+    await Storage.setVaultKey(vaultKeyHex);
+  }
 
   // Fetch vault items
   await fetchVaultItems();
@@ -134,6 +147,52 @@ async function logout() {
 }
 
 // ===== Vault Operations =====
+
+/**
+ * Initialize vault for first-time setup.
+ * Generates a new vault key, encrypts it with the master password,
+ * and sends the encrypted vault key to the server.
+ * SECURITY: The raw vault key never leaves this function except as the return value
+ * stored in memory. The server only receives the encrypted version.
+ */
+async function initializeVault(masterPassword, currentParams) {
+  // Generate a random 256-bit vault key
+  const vaultKeyRaw = CryptoClient.bufferToHex(crypto.getRandomValues(new Uint8Array(32)));
+
+  // Generate a new salt for key derivation
+  const salt = CryptoClient.bufferToHex(crypto.getRandomValues(new Uint8Array(32)));
+  const iterations = 100000;
+
+  // Derive wrapping key from master password
+  const wrappingKey = await CryptoClient.deriveKey(masterPassword, salt, iterations);
+
+  // Encrypt the vault key with the wrapping key
+  const encrypted = await CryptoClient.encrypt(vaultKeyRaw, wrappingKey);
+
+  // Send the encrypted vault key to the server to update user_security
+  try {
+    await ApiClient.request('vault/init-key', {
+      body: {
+        encryption_salt: salt,
+        encrypted_vault_key: encrypted.ciphertext,
+        vault_key_iv: encrypted.iv,
+        key_iterations: iterations
+      }
+    });
+  } catch (e) {
+    throw new Error('Failed to save vault key to server: ' + (e.message || 'Unknown error'));
+  }
+
+  const newParams = {
+    encryption_salt: salt,
+    encrypted_vault_key: encrypted.ciphertext,
+    vault_key_iv: encrypted.iv,
+    key_iterations: iterations,
+    needs_setup: false
+  };
+
+  return { vaultKeyHex: vaultKeyRaw, newParams };
+}
 
 async function fetchVaultItems() {
   const result = await ApiClient.listVault();
@@ -248,9 +307,10 @@ async function saveItem(payload) {
   if (!await Storage.isVaultUnlocked()) throw new Error('Vault is locked');
 
   const vaultKeyHex = await Storage.getVaultKey();
+  const hmacKey = await Storage.getSession('hmacKey') || 'ampass-hmac-key';
   const encrypted = await CryptoClient.encryptItem(payload.itemData, vaultKeyHex);
-  const urlHash = payload.itemData.url ? await CryptoClient.computeHMAC(DomainUtils.getBaseDomain(payload.itemData.url)) : null;
-  const titleHash = payload.itemData.title ? await CryptoClient.computeHMAC(payload.itemData.title) : null;
+  const urlHash = payload.itemData.url ? await CryptoClient.computeHMAC(DomainUtils.getBaseDomain(payload.itemData.url), hmacKey) : null;
+  const titleHash = payload.itemData.title ? await CryptoClient.computeHMAC(payload.itemData.title, hmacKey) : null;
 
   const result = await ApiClient.saveVaultItem({
     item_type: 'login',
@@ -271,9 +331,10 @@ async function updateItem(payload) {
   if (!await Storage.isVaultUnlocked()) throw new Error('Vault is locked');
 
   const vaultKeyHex = await Storage.getVaultKey();
+  const hmacKey = await Storage.getSession('hmacKey') || 'ampass-hmac-key';
   const encrypted = await CryptoClient.encryptItem(payload.itemData, vaultKeyHex);
-  const urlHash = payload.itemData.url ? await CryptoClient.computeHMAC(DomainUtils.getBaseDomain(payload.itemData.url)) : null;
-  const titleHash = payload.itemData.title ? await CryptoClient.computeHMAC(payload.itemData.title) : null;
+  const urlHash = payload.itemData.url ? await CryptoClient.computeHMAC(DomainUtils.getBaseDomain(payload.itemData.url), hmacKey) : null;
+  const titleHash = payload.itemData.title ? await CryptoClient.computeHMAC(payload.itemData.title, hmacKey) : null;
 
   const result = await ApiClient.updateVaultItem({
     id: payload.id,
