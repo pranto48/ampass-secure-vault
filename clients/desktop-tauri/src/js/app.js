@@ -12,6 +12,7 @@
   let vaultItems = [];
   let derivationParams = null;
   let hmacKey = null;
+  let searchKey = null; // Derived from vault key for title_hash/url_hash
   let allDecrypted = [];
 
   // ===== Views =====
@@ -29,12 +30,32 @@
 
   // ===== Init =====
   async function init() {
+    // Check if Tauri is available (won't be in browser preview)
+    if (!window.__TAURI__) {
+      document.getElementById('app').innerHTML = '<div class="auth-screen"><div class="auth-card"><h2>AMPass Desktop</h2><p class="auth-sub">This app requires the Tauri desktop runtime.<br>Please launch via <code>cargo tauri dev</code>.</p></div></div>';
+      return;
+    }
     try {
       const state = await invoke('get_app_state');
       if (!state.configured) { showAuth('viewWelcome'); return; }
       Api.serverUrl = state.server_url;
       if (!state.authenticated) { showAuth('viewLogin'); return; }
       Api.token = (await invoke('get_auth_token')) || '';
+
+      // If we have a token but no derivationParams, fetch them from server
+      if (!derivationParams && Api.token) {
+        try {
+          const paramResult = await Api.request('derivationParams');
+          if (paramResult.success && paramResult.params) {
+            derivationParams = paramResult.params;
+          }
+        } catch (e) {
+          // Token may be expired — redirect to login
+          showAuth('viewLogin');
+          return;
+        }
+      }
+
       if (state.locked) { showAuth('viewUnlock'); return; }
       showAuth('viewMain');
       await loadVault();
@@ -61,7 +82,6 @@
       Api.token = result.token;
       await invoke('store_auth_token', { token: result.token });
       derivationParams = result.derivation_params;
-      hmacKey = result.hmac_key || null;
       document.getElementById('loginPass').value = '';
       showAuth('viewUnlock');
     } catch (e) {
@@ -88,6 +108,8 @@
         vaultKeyHex = await Crypto.unlockVault(pass, derivationParams);
       }
       await invoke('unlock_vault', { vaultKeyHex });
+      // Derive search key from vault key for HMAC hashing
+      searchKey = await Crypto.deriveSearchKey(vaultKeyHex);
       document.getElementById('unlockPass').value = '';
       showAuth('viewMain');
       await loadVault();
@@ -236,9 +258,8 @@
     if (!data.title) { toast('Title is required'); return; }
     try {
       const encrypted = await Crypto.encryptItem(data, vaultKeyHex);
-      const hk = hmacKey || 'ampass-hmac-key';
-      const urlHash = data.url ? await Crypto.computeHMAC(data.url, hk) : null;
-      const titleHash = await Crypto.computeHMAC(data.title, hk);
+      const urlHash = data.url ? await Crypto.computeSearchHash(data.url, searchKey) : null;
+      const titleHash = await Crypto.computeSearchHash(data.title, searchKey);
       await Api.saveItem({ item_type: type, encrypted_data: encrypted.ciphertext, encryption_iv: encrypted.iv, url_hash: urlHash, title_hash: titleHash, password_strength: Crypto.strength(data.password || ''), is_weak: Crypto.strength(data.password || '') < 40 ? 1 : 0 });
       document.getElementById('itemModal').style.display = 'none';
       toast('Item saved!');

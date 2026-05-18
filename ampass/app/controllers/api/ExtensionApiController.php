@@ -245,8 +245,7 @@ class ExtensionApiController {
                 'full_name' => $user['full_name'],
                 'email' => $user['email']
             ],
-            'derivation_params' => $derivationParams,
-            'hmac_key' => substr(APP_SECRET, 0, 32)
+            'derivation_params' => $derivationParams
         ]);
     }
 
@@ -290,6 +289,24 @@ class ExtensionApiController {
         ]);
     }
 
+    /**
+     * GET /api/extension/derivationParams
+     * Get key derivation parameters for vault unlock.
+     * Used by desktop app after restoring token from keychain.
+     */
+    public function derivationParams(): void {
+        if (!$this->requireAuth()) return;
+
+        $params = UserSecurity::getDerivationParams($this->userId);
+        if (!$params) {
+            http_response_code(404);
+            echo json_encode(['error' => 'Security data not found', 'code' => 'NOT_FOUND']);
+            return;
+        }
+
+        echo json_encode(['success' => true, 'params' => $params]);
+    }
+
     // ================================================================
     // VAULT ENDPOINTS (all require auth + rate limiting)
     // ================================================================
@@ -299,51 +316,82 @@ class ExtensionApiController {
      * Initialize vault encryption key for first-time setup.
      * SECURITY: Only accepts encrypted vault key data. The server never sees the raw vault key.
      * Called once when a user's vault has not been initialized (key_iterations = 0).
+     * Requires: bearer token auth, HTTPS (except localhost), rate limited.
      */
     public function vaultInitKey(): void {
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
             http_response_code(405);
-            echo json_encode(['error' => 'Method not allowed']);
+            echo json_encode(['error' => 'Method not allowed', 'code' => 'METHOD_NOT_ALLOWED']);
             return;
         }
 
         if (!$this->requireAuth()) return;
+        if (!$this->requireHTTPS()) return;
         if (!$this->rateLimit('vault_init', 5, 300)) return;
+
+        // Verify user is active
+        $user = User::findById($this->userId);
+        if (!$user || $user['status'] !== 'active') {
+            http_response_code(403);
+            echo json_encode(['error' => 'Account is not active', 'code' => 'ACCOUNT_INACTIVE']);
+            return;
+        }
+
+        // Verify vault actually needs initialization
+        $security = UserSecurity::findByUserId($this->userId);
+        if (!$security) {
+            http_response_code(404);
+            echo json_encode(['error' => 'Security record not found', 'code' => 'NOT_FOUND']);
+            return;
+        }
+        if ((int)$security['key_iterations'] > 0 && $security['encrypted_vault_key'] !== 'VAULT_NOT_INITIALIZED') {
+            http_response_code(409);
+            echo json_encode(['error' => 'Vault is already initialized', 'code' => 'ALREADY_INITIALIZED']);
+            return;
+        }
 
         $input = json_decode(file_get_contents('php://input'), true);
         if (!$input || !is_array($input)) {
             http_response_code(400);
-            echo json_encode(['error' => 'Invalid request body']);
+            echo json_encode(['error' => 'Invalid request body', 'code' => 'INVALID_BODY']);
             return;
         }
 
         $salt = $input['encryption_salt'] ?? '';
         $encryptedKey = $input['encrypted_vault_key'] ?? '';
         $iv = $input['vault_key_iv'] ?? '';
-        $iterations = (int)($input['key_iterations'] ?? 100000);
+        $iterations = (int)($input['key_iterations'] ?? 0);
 
-        // Validate inputs
-        if (empty($salt) || empty($encryptedKey) || empty($iv)) {
+        // Strict validation
+        if (empty($salt) || empty($encryptedKey) || empty($iv) || $iterations === 0) {
             http_response_code(400);
-            echo json_encode(['error' => 'encryption_salt, encrypted_vault_key, and vault_key_iv are required']);
+            echo json_encode(['error' => 'All fields required: encryption_salt, encrypted_vault_key, vault_key_iv, key_iterations', 'code' => 'MISSING_FIELDS']);
             return;
         }
-        if (!preg_match('/^[a-f0-9]+$/', $salt) || !preg_match('/^[a-f0-9]+$/', $iv)) {
+        if (!preg_match('/^[a-f0-9]{32,256}$/', $salt)) {
             http_response_code(400);
-            echo json_encode(['error' => 'Salt and IV must be hex-encoded']);
+            echo json_encode(['error' => 'encryption_salt must be 32-256 hex chars', 'code' => 'INVALID_SALT']);
             return;
         }
-        if ($iterations < 10000 || $iterations > 1000000) {
+        if (!preg_match('/^[a-f0-9]+$/', $encryptedKey) || strlen($encryptedKey) < 32) {
             http_response_code(400);
-            echo json_encode(['error' => 'Invalid key_iterations value']);
+            echo json_encode(['error' => 'encrypted_vault_key must be valid hex', 'code' => 'INVALID_KEY']);
+            return;
+        }
+        if (!preg_match('/^[a-f0-9]{24}$/', $iv)) {
+            http_response_code(400);
+            echo json_encode(['error' => 'vault_key_iv must be 24 hex chars (12 bytes)', 'code' => 'INVALID_IV']);
+            return;
+        }
+        if ($iterations < 100000 || $iterations > 1000000) {
+            http_response_code(400);
+            echo json_encode(['error' => 'key_iterations must be between 100000 and 1000000', 'code' => 'INVALID_ITERATIONS']);
             return;
         }
 
         // Update user_security record
         $updated = UserSecurity::updateVaultKey($this->userId, [
-            'master_password_hash' => Database::fetchOne(
-                "SELECT master_password_hash FROM user_security WHERE user_id = ?", [$this->userId]
-            )['master_password_hash'] ?? '',
+            'master_password_hash' => $security['master_password_hash'],
             'encryption_salt' => $salt,
             'encrypted_vault_key' => $encryptedKey,
             'vault_key_iv' => $iv,
@@ -351,11 +399,13 @@ class ExtensionApiController {
         ]);
 
         if ($updated) {
-            ExtensionAudit::log('vault_initialized', $this->userId, $this->deviceId);
-            echo json_encode(['success' => true, 'message' => 'Vault key initialized']);
+            ExtensionAudit::log('vault_initialized_extension', $this->userId, $this->deviceId, null, null, [
+                'iterations' => $iterations
+            ]);
+            echo json_encode(['success' => true]);
         } else {
             http_response_code(500);
-            echo json_encode(['error' => 'Failed to initialize vault key']);
+            echo json_encode(['error' => 'Failed to initialize vault key', 'code' => 'INTERNAL_ERROR']);
         }
     }
 

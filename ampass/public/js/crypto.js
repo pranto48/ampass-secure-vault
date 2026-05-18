@@ -252,8 +252,40 @@ const AMPassCrypto = (function() {
     }
 
     /**
-     * Compute HMAC-SHA256 for server-side searchable hash
-     * Used for title_hash and url_hash so server can match without seeing plaintext
+     * Derive a search key from the vault key.
+     * Used for title_hash and url_hash generation.
+     * SECURITY: Derived deterministically from vault key — no server secret needed.
+     */
+    async function deriveSearchKey() {
+        if (!_vaultKey) {
+            const restored = await restoreVaultKey();
+            if (!restored) throw new Error('Vault is locked');
+        }
+        const vaultKeyRaw = await exportKey(_vaultKey);
+        const keyData = hexToBuffer(vaultKeyRaw);
+        const key = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+        const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode('ampass-search-key-v1'));
+        return bufferToHex(new Uint8Array(sig));
+    }
+
+    /**
+     * Compute search hash using vault-derived search key.
+     * Use this for new items instead of computeHMAC.
+     */
+    async function computeSearchHash(data, searchKey) {
+        if (!data || !searchKey) return null;
+        const encoder = new TextEncoder();
+        const keyData = hexToBuffer(searchKey);
+        const message = encoder.encode(data.toLowerCase().trim());
+        const key = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+        const sig = await crypto.subtle.sign('HMAC', key, message);
+        return bufferToHex(new Uint8Array(sig));
+    }
+
+    /**
+     * LEGACY: Compute HMAC-SHA256 with explicit secret.
+     * Only for backward compatibility with old records.
+     * New items should use computeSearchHash with vault-derived key.
      */
     async function computeHMAC(data, secret) {
         const encoder = new TextEncoder();
@@ -410,6 +442,8 @@ const AMPassCrypto = (function() {
         isUnlocked,
         encryptVaultItem,
         decryptVaultItem,
+        deriveSearchKey,
+        computeSearchHash,
         computeHMAC,
         generatePassword,
         generatePassphrase,

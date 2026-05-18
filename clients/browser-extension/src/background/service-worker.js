@@ -92,10 +92,6 @@ async function login(payload) {
   await Storage.setToken(result.token);
   await Storage.setDerivationParams(result.derivation_params);
   await Storage.setSession('user', result.user);
-  // Store HMAC key for url_hash/title_hash computation
-  if (result.hmac_key) {
-    await Storage.setSession('hmacKey', result.hmac_key);
-  }
 
   return { success: true, user: result.user, needsUnlock: true };
 }
@@ -307,10 +303,10 @@ async function saveItem(payload) {
   if (!await Storage.isVaultUnlocked()) throw new Error('Vault is locked');
 
   const vaultKeyHex = await Storage.getVaultKey();
-  const hmacKey = await Storage.getSession('hmacKey') || 'ampass-hmac-key';
+  const searchKey = await CryptoClient.deriveSearchKey(vaultKeyHex);
   const encrypted = await CryptoClient.encryptItem(payload.itemData, vaultKeyHex);
-  const urlHash = payload.itemData.url ? await CryptoClient.computeHMAC(DomainUtils.getBaseDomain(payload.itemData.url), hmacKey) : null;
-  const titleHash = payload.itemData.title ? await CryptoClient.computeHMAC(payload.itemData.title, hmacKey) : null;
+  const urlHash = payload.itemData.url ? await CryptoClient.computeSearchHash(DomainUtils.getBaseDomain(payload.itemData.url), searchKey) : null;
+  const titleHash = payload.itemData.title ? await CryptoClient.computeSearchHash(payload.itemData.title, searchKey) : null;
 
   const result = await ApiClient.saveVaultItem({
     item_type: 'login',
@@ -331,10 +327,10 @@ async function updateItem(payload) {
   if (!await Storage.isVaultUnlocked()) throw new Error('Vault is locked');
 
   const vaultKeyHex = await Storage.getVaultKey();
-  const hmacKey = await Storage.getSession('hmacKey') || 'ampass-hmac-key';
+  const searchKey = await CryptoClient.deriveSearchKey(vaultKeyHex);
   const encrypted = await CryptoClient.encryptItem(payload.itemData, vaultKeyHex);
-  const urlHash = payload.itemData.url ? await CryptoClient.computeHMAC(DomainUtils.getBaseDomain(payload.itemData.url), hmacKey) : null;
-  const titleHash = payload.itemData.title ? await CryptoClient.computeHMAC(payload.itemData.title, hmacKey) : null;
+  const urlHash = payload.itemData.url ? await CryptoClient.computeSearchHash(DomainUtils.getBaseDomain(payload.itemData.url), searchKey) : null;
+  const titleHash = payload.itemData.title ? await CryptoClient.computeSearchHash(payload.itemData.title, searchKey) : null;
 
   const result = await ApiClient.updateVaultItem({
     id: payload.id,

@@ -105,7 +105,34 @@ const CryptoClient = {
   },
 
   /**
-   * Compute HMAC-SHA256 for domain matching (same as web vault)
+   * Derive a search key from the vault key.
+   * Used for title_hash and url_hash generation.
+   * SECURITY: Derived deterministically from vault key — no server secret needed.
+   */
+  async deriveSearchKey(vaultKeyHex) {
+    const enc = new TextEncoder();
+    const keyData = this.hexToBuffer(vaultKeyHex);
+    const key = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const sig = await crypto.subtle.sign('HMAC', key, enc.encode('ampass-search-key-v1'));
+    return this.bufferToHex(new Uint8Array(sig));
+  },
+
+  /**
+   * Compute search hash using vault-derived search key.
+   * Use this for new items.
+   */
+  async computeSearchHash(data, searchKey) {
+    if (!data || !searchKey) return null;
+    const enc = new TextEncoder();
+    const keyData = this.hexToBuffer(searchKey);
+    const message = enc.encode(data.toLowerCase().trim());
+    const key = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const sig = await crypto.subtle.sign('HMAC', key, message);
+    return this.bufferToHex(new Uint8Array(sig));
+  },
+
+  /**
+   * LEGACY: Compute HMAC-SHA256 for domain matching (backward compat only).
    */
   async computeHMAC(data, secret) {
     const encoder = new TextEncoder();
