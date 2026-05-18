@@ -18,6 +18,8 @@ importScripts(
 let cachedVaultItems = null;
 let lastFetchTime = 0;
 const CACHE_TTL = 60000; // 1 minute
+const PENDING_SAVE_TTL = 120000; // 2 minutes
+const pendingSaveCandidates = new Map();
 
 // ===== Message Handler =====
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -60,6 +62,12 @@ async function handleMessage(msg, sender) {
       return await saveItem(msg.payload);
     case 'UPDATE_ITEM':
       return await updateItem(msg.payload);
+    case 'CAPTURE_SAVE_CANDIDATE':
+      return captureSaveCandidate(msg.payload, sender);
+    case 'CHECK_PENDING_SAVE':
+      return popPendingSaveCandidate(sender);
+    case 'CLEAR_PENDING_SAVE':
+      return clearPendingSaveCandidate(sender);
     case 'GENERATE_PASSWORD':
       return { success: true, password: CryptoClient.generatePassword(msg.payload || {}) };
     case 'COPY_TO_CLIPBOARD':
@@ -71,6 +79,76 @@ async function handleMessage(msg, sender) {
     default:
       return { success: false, error: 'Unknown message type' };
   }
+}
+
+function getSenderTabKey(sender) {
+  const tabId = sender && sender.tab && Number.isInteger(sender.tab.id) ? sender.tab.id : null;
+  return tabId === null ? null : String(tabId);
+}
+
+function cleanupPendingSaveCandidates() {
+  const now = Date.now();
+  for (const [key, candidate] of pendingSaveCandidates.entries()) {
+    if (!candidate || now - candidate.capturedAt > PENDING_SAVE_TTL) {
+      if (candidate && candidate.data) {
+        candidate.data.password = null;
+        candidate.data.username = null;
+      }
+      pendingSaveCandidates.delete(key);
+    }
+  }
+}
+
+function captureSaveCandidate(payload, sender) {
+  cleanupPendingSaveCandidates();
+
+  const key = getSenderTabKey(sender);
+  const data = payload && payload.data;
+  if (!key || !data || !data.password) {
+    return { success: false, error: 'No credential data captured' };
+  }
+
+  pendingSaveCandidates.set(key, {
+    data: {
+      url: String(data.url || ''),
+      title: String(data.title || ''),
+      username: String(data.username || ''),
+      password: String(data.password || ''),
+      domain: String(data.domain || '')
+    },
+    capturedAt: Date.now()
+  });
+
+  return { success: true };
+}
+
+function popPendingSaveCandidate(sender) {
+  cleanupPendingSaveCandidates();
+
+  const key = getSenderTabKey(sender);
+  if (!key || !pendingSaveCandidates.has(key)) {
+    return { success: true, data: null };
+  }
+
+  const candidate = pendingSaveCandidates.get(key);
+  pendingSaveCandidates.delete(key);
+
+  if (!candidate || Date.now() - candidate.capturedAt > PENDING_SAVE_TTL) {
+    return { success: true, data: null };
+  }
+
+  return { success: true, data: candidate.data };
+}
+
+function clearPendingSaveCandidate(sender) {
+  const key = getSenderTabKey(sender);
+  const candidate = key ? pendingSaveCandidates.get(key) : null;
+  if (candidate && candidate.data) {
+    candidate.data.password = null;
+    candidate.data.username = null;
+  }
+  if (key) pendingSaveCandidates.delete(key);
+  return { success: true };
 }
 
 async function resetExtension() {

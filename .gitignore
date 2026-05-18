@@ -6,6 +6,10 @@ ampass/config/.install_lock
 
 # Rust build artifacts
 clients/desktop-tauri/src-tauri/target/
+clients/desktop-tauri/src-tauri/gen/
+
+# Release build output
+release/dist/
 
 # Node modules
 node_modules/

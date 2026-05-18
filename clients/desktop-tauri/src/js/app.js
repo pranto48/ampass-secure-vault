@@ -52,7 +52,7 @@
     try {
       const state = await invoke('get_app_state');
       if (!state.configured) { showAuth('viewWelcome'); return; }
-      Api.serverUrl = state.server_url;
+      Api.setServerUrl(state.server_url);
       if (!state.authenticated) { showAuth('viewLogin'); return; }
       Api.token = (await invoke('get_auth_token')) || '';
 
@@ -80,8 +80,9 @@
   document.getElementById('btnConnect').addEventListener('click', async () => {
     const url = document.getElementById('welcomeUrl').value.trim();
     if (!url) return;
-    await invoke('set_server_url', { url });
-    Api.serverUrl = url;
+    const serverUrl = Api.normalizeServerUrl(url);
+    await invoke('set_server_url', { url: serverUrl });
+    Api.setServerUrl(serverUrl);
     showAuth('viewLogin');
   });
 

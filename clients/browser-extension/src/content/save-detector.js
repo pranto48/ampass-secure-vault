@@ -9,6 +9,7 @@
   'use strict';
 
   let lastSubmittedData = null;
+  let lastCaptureAt = 0;
 
   /**
    * Capture form submission data
@@ -67,17 +68,42 @@
   function onFormSubmit(e) {
     const form = e.target;
     if (!(form instanceof HTMLFormElement)) return;
+    captureAndQueue(form);
+  }
+
+  /**
+   * Capture and queue credentials before the page can navigate away.
+   */
+  function captureAndQueue(form) {
+    if (!(form instanceof HTMLFormElement)) return;
 
     const data = captureSubmission(form);
-    if (!data) return;
+    if (!data) return null;
 
     // Don't capture if it was autofilled by us (avoid re-saving what we just filled)
     const pwField = form.querySelector('input[type="password"][data-ampass-filled]');
-    if (pwField) return;
+    if (pwField) return null;
 
     lastSubmittedData = data;
+    lastCaptureAt = Date.now();
 
-    // Send to service worker to check if this is new or an update
+    // Queue first so the save prompt survives normal login redirects.
+    chrome.runtime.sendMessage({
+      type: 'CAPTURE_SAVE_CANDIDATE',
+      payload: { data }
+    }).catch(() => {});
+
+    // Also try the current page for no-navigation and SPA login flows.
+    setTimeout(() => processSaveCandidate(data), 250);
+    return data;
+  }
+
+  /**
+   * Check whether the captured credential is new or an update.
+   */
+  function processSaveCandidate(data) {
+    if (!data || !data.password) return;
+
     chrome.runtime.sendMessage({
       type: 'GET_MATCHES',
       payload: { url: data.url }
@@ -91,6 +117,57 @@
         // New credential - ask to save
         showSavePrompt('save', data);
       }
+    }).catch(() => {});
+  }
+
+  /**
+   * Find the nearest login form from a clicked/typed control.
+   */
+  function findFormFromEventTarget(target) {
+    if (!(target instanceof HTMLElement)) return null;
+
+    const form = target.closest('form');
+    if (form) return form;
+
+    const passwordField = target.matches('input[type="password"]')
+      ? target
+      : document.activeElement instanceof HTMLElement
+        ? document.activeElement.closest('form')?.querySelector('input[type="password"]')
+        : null;
+
+    return passwordField ? passwordField.closest('form') : null;
+  }
+
+  /**
+   * Some modern login forms submit from JS click handlers without a submit event.
+   */
+  function onDocumentClick(e) {
+    const target = e.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    const clickable = target.closest('button, input[type="submit"], input[type="button"], [role="button"]');
+    if (!clickable) return;
+
+    const form = findFormFromEventTarget(clickable);
+    if (form) captureAndQueue(form);
+  }
+
+  /**
+   * Capture Enter-key login submits before JavaScript navigation starts.
+   */
+  function onDocumentKeydown(e) {
+    if (e.key !== 'Enter') return;
+    const form = findFormFromEventTarget(e.target);
+    if (form) captureAndQueue(form);
+  }
+
+  /**
+   * Show a queued prompt after the destination page loads.
+   */
+  function checkPendingSave() {
+    chrome.runtime.sendMessage({ type: 'CHECK_PENDING_SAVE' }).then(response => {
+      if (!response || !response.success || !response.data) return;
+      processSaveCandidate(response.data);
     }).catch(() => {});
   }
 
@@ -142,10 +219,12 @@
 
     // Handle buttons
     prompt.querySelector('#ampass-save-dismiss').addEventListener('click', () => {
+      chrome.runtime.sendMessage({ type: 'CLEAR_PENDING_SAVE' }).catch(() => {});
       prompt.remove();
     });
 
     prompt.querySelector('#ampass-save-confirm').addEventListener('click', () => {
+      chrome.runtime.sendMessage({ type: 'CLEAR_PENDING_SAVE' }).catch(() => {});
       if (action === 'update' && existingItem) {
         chrome.runtime.sendMessage({
           type: 'UPDATE_ITEM',
@@ -181,6 +260,7 @@
     // Auto-dismiss after 15 seconds
     setTimeout(() => {
       if (document.getElementById('ampass-save-prompt')) {
+        chrome.runtime.sendMessage({ type: 'CLEAR_PENDING_SAVE' }).catch(() => {});
         prompt.remove();
       }
     }, 15000);
@@ -190,11 +270,20 @@
 
   // Listen for form submissions
   document.addEventListener('submit', onFormSubmit, true);
+  document.addEventListener('click', onDocumentClick, true);
+  document.addEventListener('keydown', onDocumentKeydown, true);
+
+  // Pick up credentials queued before a normal login redirect.
+  setTimeout(checkPendingSave, 500);
 
   // Also detect navigation-based submissions (some SPAs)
   window.addEventListener('beforeunload', () => {
-    // If there's pending data, it's too late to save
-    lastSubmittedData = null;
+    if (lastSubmittedData && Date.now() - lastCaptureAt < 5000) {
+      chrome.runtime.sendMessage({
+        type: 'CAPTURE_SAVE_CANDIDATE',
+        payload: { data: lastSubmittedData }
+      }).catch(() => {});
+    }
   });
 
   // Inject Security helper for escapeHtml (local to IIFE, not exposed to page)

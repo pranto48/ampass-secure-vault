@@ -6,15 +6,34 @@ const Api = {
   serverUrl: '',
   token: '',
 
+  normalizeServerUrl(url) {
+    return String(url || '').trim().replace(/\/+$/, '');
+  },
+
+  setServerUrl(url) {
+    this.serverUrl = this.normalizeServerUrl(url);
+  },
+
   async request(endpoint, opts = {}) {
     if (!this.serverUrl) throw new Error('Server URL not configured');
-    const url = this.serverUrl + '/api/extension/' + endpoint.replace(/^\//, '');
+    const baseUrl = this.normalizeServerUrl(this.serverUrl);
+    const url = baseUrl + '/api/extension/' + endpoint.replace(/^\//, '');
     const headers = { 'Content-Type': 'application/json', 'X-AMPass-Version': '1.0' };
     if (this.token) headers['Authorization'] = 'Bearer ' + this.token;
     const config = { method: opts.method || 'GET', headers };
     if (opts.body) { config.method = 'POST'; config.body = JSON.stringify(opts.body); }
-    const res = await fetch(url, config);
-    const data = await res.json();
+    let res;
+    try {
+      res = await fetch(url, config);
+    } catch (err) {
+      throw new Error('Cannot reach AMPass server. Check that XAMPP Apache is running and the server URL is ' + baseUrl);
+    }
+    let data;
+    try {
+      data = await res.json();
+    } catch (err) {
+      throw new Error('AMPass server returned an invalid response from ' + baseUrl);
+    }
     if (!res.ok) { const e = new Error(data.error || 'Request failed'); e.code = data.code; throw e; }
     return data;
   },

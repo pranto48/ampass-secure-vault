@@ -4,7 +4,7 @@
 //! Clears vault key from memory on lock.
 
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 const DEFAULT_LOCK_TIMEOUT_SECS: u64 = 900; // 15 minutes
 

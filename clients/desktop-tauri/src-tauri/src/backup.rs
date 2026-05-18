@@ -17,7 +17,9 @@ pub async fn pick_backup_file(app: tauri::AppHandle) -> Result<Option<String>, S
     
     match file {
         Some(path) => {
-            let content = std::fs::read_to_string(path.path)
+            let path = path.into_path()
+                .map_err(|_| "Selected backup file path is not accessible".to_string())?;
+            let content = std::fs::read_to_string(path)
                 .map_err(|e| format!("Failed to read file: {}", e))?;
             Ok(Some(content))
         }
@@ -37,7 +39,9 @@ pub async fn pick_save_location(app: tauri::AppHandle, data: String) -> Result<b
     
     match file {
         Some(path) => {
-            std::fs::write(path.path, data)
+            let path = path.into_path()
+                .map_err(|_| "Selected backup save path is not accessible".to_string())?;
+            std::fs::write(path, data)
                 .map_err(|e| format!("Failed to write file: {}", e))?;
             Ok(true)
         }

@@ -1,8 +1,8 @@
-# AMPass Desktop — Windows Build Script
+# AMPass Desktop - Windows Build Script
 # Builds the Tauri desktop app and copies release files to release/dist/
 
 Write-Host "============================================"
-Write-Host " AMPass Desktop — Windows Build"
+Write-Host " AMPass Desktop - Windows Build"
 Write-Host "============================================"
 Write-Host ""
 
@@ -52,16 +52,18 @@ $checksums = @()
 if ($exeFile) {
     Copy-Item $exeFile.FullName -Destination $distDir -Force
     $hash = (Get-FileHash $exeFile.FullName -Algorithm SHA256).Hash
+    $sizeMb = [math]::Round(($exeFile.Length / 1MB), 1)
     $checksums += "$hash  $($exeFile.Name)"
-    Write-Host "  EXE: $($exeFile.Name) ($([math]::Round($exeFile.Length/1MB, 1)) MB)" -ForegroundColor Green
+    Write-Host ('  EXE: {0} ({1} MB)' -f $exeFile.Name, $sizeMb) -ForegroundColor Green
     Write-Host "  SHA-256: $hash"
 }
 
 if ($msiFile) {
     Copy-Item $msiFile.FullName -Destination $distDir -Force
     $hash = (Get-FileHash $msiFile.FullName -Algorithm SHA256).Hash
+    $sizeMb = [math]::Round(($msiFile.Length / 1MB), 1)
     $checksums += "$hash  $($msiFile.Name)"
-    Write-Host "  MSI: $($msiFile.Name) ($([math]::Round($msiFile.Length/1MB, 1)) MB)" -ForegroundColor Green
+    Write-Host ('  MSI: {0} ({1} MB)' -f $msiFile.Name, $sizeMb) -ForegroundColor Green
     Write-Host "  SHA-256: $hash"
 }
 
@@ -75,10 +77,10 @@ if ($checksums.Count -gt 0) {
 
 Write-Host ""
 Write-Host "============================================"
-Write-Host " Next steps:"
-Write-Host " 1. Open AMPass web app as admin"
-Write-Host " 2. Go to Admin → Release Downloads"
-Write-Host " 3. Upload the .exe as 'Windows EXE'"
-Write-Host " 4. Upload the .msi as 'Windows MSI'"
-Write-Host " 5. Set version and enable the release"
+Write-Host ' Next steps:'
+Write-Host ' 1. Open AMPass web app as admin'
+Write-Host ' 2. Go to Admin -> Release Downloads'
+Write-Host ' 3. Upload the .exe as Windows EXE'
+Write-Host ' 4. Upload the .msi as Windows MSI'
+Write-Host ' 5. Set version and enable the release'
 Write-Host "============================================"

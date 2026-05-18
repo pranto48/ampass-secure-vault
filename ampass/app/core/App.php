@@ -207,12 +207,21 @@ class App {
             str_starts_with($origin, 'safari-web-extension://')
         );
 
-        // Check if origin is in allowed list, or if it's an extension origin and list is empty (dev mode)
+        // Tauri desktop WebView origins vary by platform/runtime. Treat these
+        // as local-app origins only when the AMPass server itself is localhost.
+        $isDesktopOrigin = in_array($origin, [
+            'tauri://localhost',
+            'http://tauri.localhost',
+            'https://tauri.localhost',
+            'asset://localhost'
+        ], true);
+
+        // Check if origin is in allowed list, or if it's a local extension/desktop origin in dev mode.
         $allowed = false;
         if (!empty($allowedOrigins)) {
             $allowed = in_array($origin, $allowedOrigins, true);
-        } elseif ($isExtensionOrigin && Security::isLocalhost()) {
-            // Allow any extension origin on localhost for development
+        } elseif (($isExtensionOrigin || $isDesktopOrigin) && Security::isLocalhost()) {
+            // Allow browser extension and desktop app origins on localhost for development.
             $allowed = true;
         }
 
