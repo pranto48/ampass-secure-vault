@@ -28,6 +28,9 @@ RewriteRule ^database/ - [F,L]
 # Block direct access to docs directory
 RewriteRule ^docs/ - [F,L]
 
+# Block direct access to app_storage directory
+RewriteRule ^app_storage/ - [F,L]
+
 # ============================================================
 # INSTALL DIRECTORY — conditional access
 # Accessible ONLY when config/config.php does NOT exist (fresh install).

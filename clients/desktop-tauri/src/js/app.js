@@ -1,6 +1,6 @@
 /**
- * AMPass Desktop - Main Application Logic
- * SECURITY: Vault key held in Rust backend memory. Frontend uses it transiently for crypto.
+ * AMPass Desktop — Main Application
+ * SECURITY: Vault key in memory only. Cleared on lock/quit.
  */
 (function() {
   'use strict';
@@ -11,40 +11,43 @@
   let vaultKeyHex = null;
   let vaultItems = [];
   let derivationParams = null;
+  let hmacKey = null;
+  let allDecrypted = [];
 
   // ===== Views =====
-  const views = { setup: 'viewSetup', login: 'viewLogin', unlock: 'viewUnlock', vault: 'viewVault', generator: 'viewGenerator', settings: 'viewSettings' };
+  function showAuth(id) {
+    ['viewWelcome','viewLogin','viewUnlock','viewMain'].forEach(v => document.getElementById(v).style.display = 'none');
+    document.getElementById(id).style.display = id === 'viewMain' ? 'flex' : 'flex';
+  }
 
-  function showView(name) {
-    Object.values(views).forEach(id => { document.getElementById(id).style.display = 'none'; });
-    document.getElementById(views[name]).style.display = (name === 'setup' || name === 'login' || name === 'unlock') ? 'flex' : 'block';
-    document.getElementById('sidebar').style.display = (name === 'vault' || name === 'generator' || name === 'settings') ? 'flex' : 'none';
-    // Update nav active state
-    document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.view === name));
+  function showPage(name) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    const page = document.getElementById('page' + name.charAt(0).toUpperCase() + name.slice(1));
+    if (page) page.classList.add('active');
+    document.querySelectorAll('.nav-link').forEach(l => l.classList.toggle('active', l.dataset.page === name));
   }
 
   // ===== Init =====
   async function init() {
     try {
       const state = await invoke('get_app_state');
-      if (!state.configured) { showView('setup'); return; }
+      if (!state.configured) { showAuth('viewWelcome'); return; }
       Api.serverUrl = state.server_url;
-      if (!state.authenticated) { showView('login'); return; }
-      const token = await invoke('get_auth_token');
-      if (token) Api.token = token;
-      if (state.locked) { showView('unlock'); return; }
-      showView('vault');
+      if (!state.authenticated) { showAuth('viewLogin'); return; }
+      Api.token = (await invoke('get_auth_token')) || '';
+      if (state.locked) { showAuth('viewUnlock'); return; }
+      showAuth('viewMain');
       await loadVault();
-    } catch (e) { showView('setup'); }
+    } catch (e) { showAuth('viewWelcome'); }
   }
 
-  // ===== Setup =====
-  document.getElementById('btnSetupSave').addEventListener('click', async () => {
-    const url = document.getElementById('setupUrl').value.trim();
+  // ===== Connect =====
+  document.getElementById('btnConnect').addEventListener('click', async () => {
+    const url = document.getElementById('welcomeUrl').value.trim();
     if (!url) return;
     await invoke('set_server_url', { url });
     Api.serverUrl = url;
-    showView('login');
+    showAuth('viewLogin');
   });
 
   // ===== Login =====
@@ -52,211 +55,251 @@
     const user = document.getElementById('loginUser').value.trim();
     const pass = document.getElementById('loginPass').value;
     if (!user || !pass) return;
-    const errEl = document.getElementById('loginError');
-    errEl.style.display = 'none';
+    document.getElementById('loginErr').textContent = '';
     try {
-      const result = await Api.login(user, pass, 'AMPass Desktop');
+      const result = await Api.login(user, pass, 'AMPass Desktop on Windows');
       Api.token = result.token;
       await invoke('store_auth_token', { token: result.token });
       derivationParams = result.derivation_params;
+      hmacKey = result.hmac_key || null;
       document.getElementById('loginPass').value = '';
-      showView('unlock');
+      showAuth('viewUnlock');
     } catch (e) {
-      errEl.textContent = e.message; errEl.style.display = 'block';
+      document.getElementById('loginErr').textContent = e.message;
       document.getElementById('loginPass').value = '';
     }
   });
-
   document.getElementById('loginPass').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('btnLogin').click(); });
 
   // ===== Unlock =====
   document.getElementById('btnUnlock').addEventListener('click', async () => {
     const pass = document.getElementById('unlockPass').value;
     if (!pass) return;
-    const errEl = document.getElementById('unlockError');
-    errEl.style.display = 'none';
+    document.getElementById('unlockErr').textContent = '';
     try {
       if (!derivationParams) {
-        // Fetch derivation params if not cached
-        const token = await invoke('get_auth_token');
-        if (token) Api.token = token;
-        // We need to get params from server - use session endpoint or re-login
+        Api.token = (await invoke('get_auth_token')) || '';
         throw new Error('Session expired. Please login again.');
       }
-      vaultKeyHex = await Crypto.unlockVault(pass, derivationParams);
+      // Check if vault needs initialization
+      if (derivationParams.needs_setup || derivationParams.key_iterations === 0 || derivationParams.encrypted_vault_key === 'VAULT_NOT_INITIALIZED') {
+        await initializeVault(pass);
+      } else {
+        vaultKeyHex = await Crypto.unlockVault(pass, derivationParams);
+      }
       await invoke('unlock_vault', { vaultKeyHex });
       document.getElementById('unlockPass').value = '';
-      showView('vault');
+      showAuth('viewMain');
       await loadVault();
     } catch (e) {
-      errEl.textContent = e.message || 'Invalid master password'; errEl.style.display = 'block';
+      document.getElementById('unlockErr').textContent = e.message || 'Invalid master password';
       document.getElementById('unlockPass').value = '';
     }
   });
-
   document.getElementById('unlockPass').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('btnUnlock').click(); });
 
-  // ===== Vault =====
+  async function initializeVault(masterPassword) {
+    const vaultKeyRaw = Crypto.bufToHex(crypto.getRandomValues(new Uint8Array(32)));
+    const salt = Crypto.bufToHex(crypto.getRandomValues(new Uint8Array(32)));
+    const iterations = 100000;
+    const wrappingKey = await Crypto.deriveKey(masterPassword, salt, iterations);
+    const encrypted = await Crypto.encrypt(vaultKeyRaw, wrappingKey);
+    await Api.request('vault/init-key', { body: { encryption_salt: salt, encrypted_vault_key: encrypted.ciphertext, vault_key_iv: encrypted.iv, key_iterations: iterations } });
+    derivationParams = { encryption_salt: salt, encrypted_vault_key: encrypted.ciphertext, vault_key_iv: encrypted.iv, key_iterations: iterations, needs_setup: false };
+    vaultKeyHex = vaultKeyRaw;
+  }
+
+  // ===== Load Vault =====
   async function loadVault() {
     try {
       const result = await Api.listVault();
       vaultItems = result.items || [];
-      // Cache encrypted items locally
       await invoke('save_vault_cache', { encryptedItemsJson: JSON.stringify(vaultItems) });
-      renderVault(vaultItems);
     } catch (e) {
-      // Try loading from cache
       const cached = await invoke('load_vault_cache');
-      if (cached) {
-        vaultItems = JSON.parse(cached);
-        renderVault(vaultItems);
-        showStatus('Offline — showing cached data', 'offline');
-      }
+      if (cached) { vaultItems = JSON.parse(cached); toast('Offline — cached data'); }
     }
+    await decryptAll();
+    renderQuickAccess();
+    renderWebAccounts();
+    renderIdentities();
+    renderMemos();
+    updateSyncTime();
     await invoke('record_activity');
   }
 
-  async function renderVault(items) {
-    const list = document.getElementById('vaultList');
-    const empty = document.getElementById('vaultEmpty');
-    if (!items.length) { list.innerHTML = ''; empty.style.display = 'block'; return; }
-    empty.style.display = 'none';
-
-    const rendered = [];
-    for (const item of items) {
+  async function decryptAll() {
+    allDecrypted = [];
+    for (const item of vaultItems) {
       try {
         const dec = await Crypto.decryptItem(item.encrypted_data, item.encryption_iv, vaultKeyHex);
-        rendered.push({ id: item.id, title: dec.title || 'Untitled', username: dec.username || dec.email || '', type: item.item_type });
-      } catch { rendered.push({ id: item.id, title: '[Decrypt Error]', username: '', type: item.item_type }); }
+        allDecrypted.push({ ...dec, _id: item.id, _type: item.item_type, _fav: item.is_favorite, _weak: item.is_weak, _used: item.last_used_at });
+      } catch { allDecrypted.push({ title: '[Decrypt Error]', _id: item.id, _type: item.item_type }); }
     }
-
-    list.innerHTML = rendered.map(i => `
-      <div class="vault-item" data-id="${i.id}">
-        <div class="vault-item-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg></div>
-        <div class="vault-item-info">
-          <span class="vault-item-title">${esc(i.title)}</span>
-          <span class="vault-item-sub">${esc(i.username)}</span>
-        </div>
-        <div class="vault-item-actions">
-          <button title="Copy password" data-action="copy-pass" data-id="${i.id}">📋</button>
-        </div>
-      </div>
-    `).join('');
-
-    list.querySelectorAll('[data-action="copy-pass"]').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const id = parseInt(btn.dataset.id);
-        const item = vaultItems.find(x => x.id === id);
-        if (!item) return;
-        const dec = await Crypto.decryptItem(item.encrypted_data, item.encryption_iv, vaultKeyHex);
-        if (dec.password) {
-          await navigator.clipboard.writeText(dec.password);
-          showStatus('Password copied (clears in 30s)', 'success');
-          setTimeout(async () => { try { const c = await navigator.clipboard.readText(); if (c === dec.password) await navigator.clipboard.writeText(''); } catch {} }, 30000);
-        }
-      });
-    });
   }
 
+  // ===== Render Functions =====
+  function renderQuickAccess() {
+    document.getElementById('statTotal').textContent = allDecrypted.length;
+    document.getElementById('statFavorites').textContent = allDecrypted.filter(i => i._fav).length;
+    document.getElementById('statWeak').textContent = allDecrypted.filter(i => i._weak).length;
+    const score = allDecrypted.length > 0 ? Math.max(0, 100 - Math.round(allDecrypted.filter(i => i._weak).length / allDecrypted.length * 100)) : '—';
+    document.getElementById('statScore').textContent = score + (typeof score === 'number' ? '%' : '');
+    document.getElementById('secScore').textContent = score + (typeof score === 'number' ? '%' : '');
+    document.getElementById('secWeak').textContent = allDecrypted.filter(i => i._weak).length;
+    document.getElementById('secReused').textContent = '0';
+
+    const recent = [...allDecrypted].filter(i => i._used).sort((a, b) => (b._used || '').localeCompare(a._used || '')).slice(0, 5);
+    document.getElementById('recentList').innerHTML = recent.length ? recent.map(i => itemRow(i)).join('') : '<p class="empty-hint">No recently used items</p>';
+    const favs = allDecrypted.filter(i => i._fav).slice(0, 5);
+    document.getElementById('favoritesList').innerHTML = favs.length ? favs.map(i => itemRow(i)).join('') : '<p class="empty-hint">No favorites yet</p>';
+  }
+
+  function renderWebAccounts() {
+    const items = allDecrypted.filter(i => i._type === 'login');
+    document.getElementById('webAccountsList').innerHTML = items.length ? items.map(i => itemRow(i)).join('') : '<p class="empty-hint">No web accounts</p>';
+  }
+
+  function renderIdentities() {
+    const items = allDecrypted.filter(i => i._type === 'identity');
+    document.getElementById('identitiesList').innerHTML = items.length ? items.map(i => itemRow(i)).join('') : '<p class="empty-hint">No identities</p>';
+  }
+
+  function renderMemos() {
+    const items = allDecrypted.filter(i => i._type === 'secure_note');
+    document.getElementById('memosList').innerHTML = items.length ? items.map(i => itemRow(i)).join('') : '<p class="empty-hint">No secure memos</p>';
+  }
+
+  function itemRow(item) {
+    const icon = item._type === 'login' ? '🌐' : item._type === 'identity' ? '👤' : item._type === 'secure_note' ? '📝' : '📦';
+    return `<div class="item-row" data-id="${item._id}">
+      <div class="item-icon">${icon}</div>
+      <div class="item-info"><div class="item-title">${esc(item.title || 'Untitled')}</div><div class="item-sub">${esc(item.username || item.email || item.url || '')}</div></div>
+      <div class="item-actions"><button class="btn-ghost-sm" data-copy-user="${item._id}" title="Copy username">👤</button><button class="btn-ghost-sm" data-copy-pass="${item._id}" title="Copy password">📋</button></div>
+    </div>`;
+  }
+
+  // ===== Item Actions =====
+  document.addEventListener('click', async (e) => {
+    const copyUser = e.target.closest('[data-copy-user]');
+    if (copyUser) { e.stopPropagation(); await copyField(parseInt(copyUser.dataset.copyUser), 'username'); return; }
+    const copyPass = e.target.closest('[data-copy-pass]');
+    if (copyPass) { e.stopPropagation(); await copyField(parseInt(copyPass.dataset.copyPass), 'password'); return; }
+    const row = e.target.closest('.item-row');
+    if (row) { showItemDetail(parseInt(row.dataset.id)); return; }
+    const addBtn = e.target.closest('[data-add]');
+    if (addBtn) { showAddModal(addBtn.dataset.add); return; }
+  });
+
+  async function copyField(id, field) {
+    const item = allDecrypted.find(i => i._id === id);
+    if (!item || !item[field]) { toast('Nothing to copy'); return; }
+    await navigator.clipboard.writeText(item[field]);
+    toast(field === 'password' ? 'Password copied (clears in 30s)' : 'Copied!');
+    if (field === 'password') setTimeout(async () => { try { const c = await navigator.clipboard.readText(); if (c === item[field]) await navigator.clipboard.writeText(''); } catch {} }, 30000);
+  }
+
+  function showItemDetail(id) {
+    const item = allDecrypted.find(i => i._id === id);
+    if (!item) return;
+    document.getElementById('modalTitle').textContent = item.title || 'Item Details';
+    let html = '';
+    if (item.url) html += `<div class="field-label">URL</div><div class="field-input" style="margin-bottom:8px;">${esc(item.url)}</div>`;
+    if (item.username) html += `<div class="field-label">Username</div><div class="field-input" style="margin-bottom:8px;">${esc(item.username)}</div>`;
+    if (item.password) html += `<div class="field-label">Password</div><div class="field-input" style="margin-bottom:8px;">••••••••</div>`;
+    if (item.notes) html += `<div class="field-label">Notes</div><div class="field-input" style="margin-bottom:8px;white-space:pre-wrap;">${esc(item.notes)}</div>`;
+    document.getElementById('modalBody').innerHTML = html || '<p class="empty-hint">No details</p>';
+    document.getElementById('modalFooter').innerHTML = `<button class="btn-ghost-sm" onclick="document.getElementById('itemModal').style.display='none'">Close</button>`;
+    document.getElementById('itemModal').style.display = 'flex';
+  }
+
+  function showAddModal(type) {
+    document.getElementById('modalTitle').textContent = type === 'login' ? 'Add Web Account' : type === 'identity' ? 'Add Identity' : 'Add Secure Memo';
+    let html = '<div class="auth-form">';
+    html += '<label class="field-label">Title</label><input type="text" id="addTitle" class="field-input">';
+    if (type === 'login') {
+      html += '<label class="field-label">URL</label><input type="url" id="addUrl" class="field-input">';
+      html += '<label class="field-label">Username</label><input type="text" id="addUser" class="field-input">';
+      html += '<label class="field-label">Password</label><input type="password" id="addPass" class="field-input">';
+    }
+    html += '<label class="field-label">Notes</label><textarea id="addNotes" class="field-input" rows="3"></textarea>';
+    html += '</div>';
+    document.getElementById('modalBody').innerHTML = html;
+    document.getElementById('modalFooter').innerHTML = `<button class="btn-ghost-sm" onclick="document.getElementById('itemModal').style.display='none'">Cancel</button><button class="btn-primary" style="width:auto;margin:0;padding:8px 16px;" id="btnSaveNew">Save</button>`;
+    document.getElementById('itemModal').style.display = 'flex';
+    document.getElementById('btnSaveNew').addEventListener('click', () => saveNewItem(type));
+  }
+
+  async function saveNewItem(type) {
+    const data = { title: document.getElementById('addTitle')?.value || '', notes: document.getElementById('addNotes')?.value || '' };
+    if (type === 'login') { data.url = document.getElementById('addUrl')?.value || ''; data.username = document.getElementById('addUser')?.value || ''; data.password = document.getElementById('addPass')?.value || ''; }
+    if (!data.title) { toast('Title is required'); return; }
+    try {
+      const encrypted = await Crypto.encryptItem(data, vaultKeyHex);
+      const hk = hmacKey || 'ampass-hmac-key';
+      const urlHash = data.url ? await Crypto.computeHMAC(data.url, hk) : null;
+      const titleHash = await Crypto.computeHMAC(data.title, hk);
+      await Api.saveItem({ item_type: type, encrypted_data: encrypted.ciphertext, encryption_iv: encrypted.iv, url_hash: urlHash, title_hash: titleHash, password_strength: Crypto.strength(data.password || ''), is_weak: Crypto.strength(data.password || '') < 40 ? 1 : 0 });
+      document.getElementById('itemModal').style.display = 'none';
+      toast('Item saved!');
+      await loadVault();
+    } catch (e) { toast('Save failed: ' + e.message); }
+  }
+
+  // ===== Navigation =====
+  document.getElementById('sidebarNav').addEventListener('click', (e) => {
+    const link = e.target.closest('.nav-link');
+    if (link) { e.preventDefault(); showPage(link.dataset.page); }
+  });
+
   // ===== Search =====
-  let searchTimer;
   document.getElementById('searchInput').addEventListener('input', (e) => {
-    clearTimeout(searchTimer);
-    searchTimer = setTimeout(async () => {
-      const q = e.target.value.toLowerCase().trim();
-      if (!q) { renderVault(vaultItems); return; }
-      const filtered = [];
-      for (const item of vaultItems) {
-        try {
-          const dec = await Crypto.decryptItem(item.encrypted_data, item.encryption_iv, vaultKeyHex);
-          if ((dec.title || '').toLowerCase().includes(q) || (dec.username || '').toLowerCase().includes(q) || (dec.url || '').toLowerCase().includes(q)) {
-            filtered.push(item);
-          }
-        } catch {}
-      }
-      renderVault(filtered);
-    }, 200);
+    const q = e.target.value.toLowerCase().trim();
+    const filtered = q ? allDecrypted.filter(i => (i.title||'').toLowerCase().includes(q) || (i.username||'').toLowerCase().includes(q) || (i.url||'').toLowerCase().includes(q)) : allDecrypted.filter(i => i._type === 'login');
+    document.getElementById('webAccountsList').innerHTML = filtered.length ? filtered.map(i => itemRow(i)).join('') : '<p class="empty-hint">No results</p>';
+    showPage('webAccounts');
   });
 
   // ===== Lock =====
-  document.getElementById('btnLock').addEventListener('click', async () => {
-    vaultKeyHex = null;
-    await invoke('lock_vault');
-    showView('unlock');
-  });
+  document.getElementById('btnLockVault').addEventListener('click', async () => { vaultKeyHex = null; allDecrypted = []; await invoke('lock_vault'); showAuth('viewUnlock'); });
 
   // ===== Sync =====
-  document.getElementById('btnSync').addEventListener('click', loadVault);
+  document.getElementById('btnSyncNow').addEventListener('click', loadVault);
+  function updateSyncTime() { document.getElementById('syncTime').textContent = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); }
 
   // ===== Generator =====
   function genPw() {
-    const pw = Crypto.generatePassword({
-      length: parseInt(document.getElementById('genLen').value),
-      uppercase: document.getElementById('genUpper').checked,
-      lowercase: document.getElementById('genLower').checked,
-      numbers: document.getElementById('genNums').checked,
-      symbols: document.getElementById('genSyms').checked
-    });
-    document.getElementById('genPassword').value = pw;
+    const pw = Crypto.generatePassword({ length: parseInt(document.getElementById('genLen').value), uppercase: document.getElementById('genUpper').checked, lowercase: document.getElementById('genLower').checked, numbers: document.getElementById('genNums').checked, symbols: document.getElementById('genSyms').checked });
+    document.getElementById('genPw').value = pw;
     const s = Crypto.strength(pw);
-    const fill = document.getElementById('genStrengthFill');
+    const fill = document.getElementById('genStrFill');
     fill.style.width = s + '%';
-    fill.style.background = s >= 80 ? '#22c55e' : s >= 60 ? '#84cc16' : s >= 40 ? '#f59e0b' : '#ef4444';
+    fill.style.background = s >= 80 ? '#16a34a' : s >= 60 ? '#84cc16' : s >= 40 ? '#d97706' : '#dc2626';
   }
-  document.getElementById('btnRegen').addEventListener('click', genPw);
+  document.getElementById('btnRegenerate').addEventListener('click', genPw);
   document.getElementById('genLen').addEventListener('input', (e) => { document.getElementById('genLenVal').textContent = e.target.value; genPw(); });
-  document.getElementById('btnCopyGen').addEventListener('click', async () => {
-    await navigator.clipboard.writeText(document.getElementById('genPassword').value);
-    showStatus('Copied!', 'success');
-  });
+  document.getElementById('btnCopyGen').addEventListener('click', async () => { await navigator.clipboard.writeText(document.getElementById('genPw').value); toast('Copied!'); });
 
   // ===== Settings =====
-  document.getElementById('btnExport').addEventListener('click', async () => {
-    const data = JSON.stringify({ version: '1.0', exported_at: new Date().toISOString(), items: vaultItems });
-    await invoke('pick_save_location', { data });
-  });
-  document.getElementById('btnImport').addEventListener('click', async () => {
-    const content = await invoke('pick_backup_file');
-    if (content) { showStatus('Import not yet implemented in v1', 'offline'); }
-  });
-  document.getElementById('btnWipe').addEventListener('click', async () => {
-    if (!confirm('Wipe ALL local data? This cannot be undone. Server data is not affected.')) return;
-    await invoke('wipe_local_data');
-    vaultKeyHex = null; vaultItems = []; derivationParams = null;
-    showView('setup');
-  });
-  document.getElementById('btnLogout').addEventListener('click', async () => {
-    try { await Api.logout(); } catch {}
-    await invoke('logout');
-    vaultKeyHex = null; vaultItems = []; derivationParams = null; Api.token = '';
-    showView('login');
-  });
-
-  // ===== Nav =====
-  document.querySelectorAll('.nav-item').forEach(el => {
-    el.addEventListener('click', (e) => { e.preventDefault(); showView(el.dataset.view); });
-  });
+  document.getElementById('btnLogout').addEventListener('click', async () => { try { await Api.logout(); } catch {} await invoke('logout'); vaultKeyHex = null; allDecrypted = []; Api.token = ''; showAuth('viewLogin'); });
+  document.getElementById('btnWipeCache').addEventListener('click', async () => { if (!confirm('Wipe all local data?')) return; await invoke('wipe_local_data'); vaultKeyHex = null; allDecrypted = []; showAuth('viewWelcome'); });
+  document.getElementById('btnExportBackup').addEventListener('click', async () => { const data = JSON.stringify({ version: '1.0', exported_at: new Date().toISOString(), items: vaultItems }); await invoke('pick_save_location', { data }); toast('Backup exported'); });
 
   // ===== Tauri Events =====
-  listen('tray-lock', async () => { vaultKeyHex = null; await invoke('lock_vault'); showView('unlock'); });
-  listen('auto-locked', () => { vaultKeyHex = null; showView('unlock'); });
+  listen('tray-lock', async () => { vaultKeyHex = null; allDecrypted = []; await invoke('lock_vault'); showAuth('viewUnlock'); });
+  listen('auto-locked', () => { vaultKeyHex = null; allDecrypted = []; showAuth('viewUnlock'); });
 
   // ===== Helpers =====
   function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-  function showStatus(msg, type) {
-    const bar = document.getElementById('statusBar');
-    bar.textContent = msg; bar.className = 'status-bar ' + type; bar.style.display = 'block';
-    if (type === 'success') setTimeout(() => { bar.style.display = 'none'; }, 3000);
-  }
+  function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 3000); }
 
-  // ===== Background Sync =====
-  setInterval(async () => {
-    if (vaultKeyHex) { await invoke('record_activity'); await loadVault(); }
-  }, 300000); // Every 5 minutes
+  // ===== Modal close =====
+  document.getElementById('modalClose').addEventListener('click', () => document.getElementById('itemModal').style.display = 'none');
+
+  // ===== Background sync =====
+  setInterval(async () => { if (vaultKeyHex) { await invoke('record_activity'); await loadVault(); } }, 300000);
 
   // ===== Start =====
   init();
-  // Generate initial password
-  setTimeout(genPw, 100);
+  setTimeout(genPw, 200);
 })();

@@ -1,0 +1,3 @@
+# SECURITY: Block all direct access to app_storage
+Order deny,allow
+Deny from all

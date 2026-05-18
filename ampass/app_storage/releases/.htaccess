@@ -1,0 +1,4 @@
+# SECURITY: Block all direct access to release files.
+# Files are served through the PHP download controller.
+Order deny,allow
+Deny from all

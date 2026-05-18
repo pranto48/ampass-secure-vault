@@ -1,6 +1,6 @@
 /**
  * AMPass Desktop - API Client
- * Communicates with the AMPass PHP server via Extension API.
+ * Uses the Extension API with bearer token auth.
  */
 const Api = {
   serverUrl: '',

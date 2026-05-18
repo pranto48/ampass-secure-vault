@@ -30,10 +30,10 @@ class App {
         }
 
         // Public routes (no auth required)
-        $publicRoutes = ['login', 'register', 'forgot-password', 'reset-password'];
+        $publicRoutes = ['login', 'register', 'forgot-password', 'reset-password', 'downloads'];
         
         if (in_array($page, $publicRoutes)) {
-            if (Session::isLoggedIn() && $page !== 'reset-password') {
+            if (Session::isLoggedIn() && !in_array($page, ['reset-password', 'downloads'])) {
                 $this->redirect('dashboard');
                 return;
             }

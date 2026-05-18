@@ -57,5 +57,13 @@ const Crypto = {
     return Math.max(0, Math.min(100, s));
   },
   bufToHex(buf) { return Array.from(buf).map(b => b.toString(16).padStart(2, '0')).join(''); },
-  hexToBuffer(hex) { const b = new Uint8Array(hex.length / 2); for (let i = 0; i < hex.length; i += 2) b[i/2] = parseInt(hex.substr(i, 2), 16); return b; }
+  hexToBuffer(hex) { const b = new Uint8Array(hex.length / 2); for (let i = 0; i < hex.length; i += 2) b[i/2] = parseInt(hex.substr(i, 2), 16); return b; },
+  async computeHMAC(data, secret) {
+    const enc = new TextEncoder();
+    const keyData = enc.encode(secret || 'ampass-hmac-key');
+    const message = enc.encode((data || '').toLowerCase().trim());
+    const key = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const sig = await crypto.subtle.sign('HMAC', key, message);
+    return this.bufToHex(new Uint8Array(sig));
+  }
 };
