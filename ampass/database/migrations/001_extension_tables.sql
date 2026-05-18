@@ -1,6 +1,7 @@
 -- AMPass Extension API Tables
--- Run this migration after initial schema.sql installation.
--- These tables support browser extension authentication and audit logging.
+-- UPGRADE ONLY: For existing installations that were set up before extension support.
+-- Fresh installs already include these tables in schema.sql.
+-- Run this migration only if you installed AMPass before v1.0.0 extension support was added.
 
 SET NAMES utf8mb4;
 

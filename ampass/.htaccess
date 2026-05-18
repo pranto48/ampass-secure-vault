@@ -38,12 +38,13 @@ RewriteRule ^database/ - [F,L]
 # Block access to docs directory
 RewriteRule ^docs/ - [F,L]
 
-# SECURITY: Block access to install directory after installation
-# The installer checks INSTALL_LOCKED internally, but blocking at Apache level
-# provides defense-in-depth. Remove this rule only during initial setup.
-RewriteCond %{DOCUMENT_ROOT}/%{REQUEST_URI} -f [OR]
-RewriteCond %{DOCUMENT_ROOT}/%{REQUEST_URI} -d
-RewriteRule ^install/ - [F,L]
+# SECURITY: Install directory protection
+# The installer protects itself with 3 PHP-level checks:
+#   1. INSTALL_LOCKED constant in config.php
+#   2. config/.install_lock file existence check
+#   3. Rate limiting on installation attempts
+# After installation, DELETE the /install/ directory entirely for maximum security.
+# If you cannot delete it, the PHP checks will block access automatically.
 
 # Block access to README and other documentation
 RewriteRule ^README\.md$ - [F,L]

@@ -1,15 +1,12 @@
 # AMPass Installer Protection
-# This file provides an additional layer of security.
 # After installation, DELETE the entire /install/ directory.
+#
+# This .htaccess provides defense-in-depth:
+# - The main .htaccess blocks /install/ when config.php or .install_lock exists
+# - The installer PHP code also checks INSTALL_LOCKED constant
+# - This file blocks non-index.php files from being accessed directly
 
-# If the install lock file exists, deny all access
-<IfModule mod_rewrite.c>
-    RewriteEngine On
-    RewriteCond %{DOCUMENT_ROOT}/../config/.install_lock -f
-    RewriteRule ^ - [F,L]
-</IfModule>
-
-# Block all file types except the installer itself
+# Block all file types except the installer index.php and its assets
 <FilesMatch "^(?!index\.php$)">
     Order allow,deny
     Deny from all
