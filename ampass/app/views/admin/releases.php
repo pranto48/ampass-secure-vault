@@ -66,7 +66,8 @@ $maxUpload = min((int)ini_get('upload_max_filesize'), (int)ini_get('post_max_siz
                             <select name="product_type" class="form-select" required>
                                 <option value="windows_exe">Windows EXE</option>
                                 <option value="windows_msi">Windows MSI</option>
-                                <option value="chrome_extension">Chrome/Edge Extension</option>
+                                <option value="chrome_extension">Chrome Extension</option>
+                                <option value="edge_extension">Microsoft Edge Extension</option>
                                 <option value="firefox_extension">Firefox Extension</option>
                                 <option value="pwa">PWA Package</option>
                             </select>

@@ -18,10 +18,12 @@
 ## Admin Upload (when implemented)
 
 - [ ] Admin can access `/admin/releases` page
-- [ ] Admin can upload .exe file
-- [ ] Admin can upload .msi file
-- [ ] Admin can upload .zip file
-- [ ] Admin can upload .xpi file
+- [ ] Admin can upload .exe file as Windows EXE
+- [ ] Admin can upload .msi file as Windows MSI
+- [ ] Admin can upload .zip file as Chrome Extension
+- [ ] Admin can upload .zip file as Edge Extension
+- [ ] Admin can upload .xpi file as Firefox Extension
+- [ ] Both Chrome and Edge extension uploads appear on /downloads if active
 - [ ] Upload of .php file is rejected
 - [ ] Upload of .js file is rejected
 - [ ] Upload of .html file is rejected
