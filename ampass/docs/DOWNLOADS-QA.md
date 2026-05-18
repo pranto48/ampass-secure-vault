@@ -62,6 +62,12 @@
 - [ ] Stored filenames are randomized
 - [ ] .htaccess blocks direct file access
 - [ ] Download controller validates file exists before streaming
+- [ ] Release delete cannot unlink files outside app_storage/releases
+- [ ] Product type/file extension mismatch is rejected
+- [ ] All authenticated /api/extension/* endpoints reject HTTP except localhost
+- [ ] Copy download URL button works in admin
+- [ ] Inactive release cannot be downloaded publicly
+- [ ] Public /downloads page shows uploaded active releases
 
 ## ⚠️ Not Production Ready
 

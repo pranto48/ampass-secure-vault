@@ -41,7 +41,7 @@ $maxUpload = min((int)ini_get('upload_max_filesize'), (int)ini_get('post_max_siz
         <div class="card">
             <div class="card-header"><h2 class="card-title">Downloads Page</h2></div>
             <div class="card-body">
-                <form method="POST" action="<?= APP_URL ?>/admin/releasesToggle">
+                <form method="POST" action="<?= APP_URL ?>/admin/releases/toggle">
                     <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
                     <input type="hidden" name="setting" value="downloads_enabled">
                     <input type="hidden" name="value" value="<?= ($settings['downloads_enabled'] ?? '1') === '1' ? '0' : '1' ?>">
@@ -57,7 +57,8 @@ $maxUpload = min((int)ini_get('upload_max_filesize'), (int)ini_get('post_max_siz
         <div class="card">
             <div class="card-header"><h2 class="card-title">Upload Release</h2></div>
             <div class="card-body">
-                <form method="POST" action="<?= APP_URL ?>/admin/releasesUpload" enctype="multipart/form-data">
+                <div class="alert alert-warning" style="margin-bottom:12px;">⚠️ Only upload release files that you built yourself. Never upload untrusted executables.</div>
+                <form method="POST" action="<?= APP_URL ?>/admin/releases/upload" enctype="multipart/form-data">
                     <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
                     <div class="form-row">
                         <div class="form-group">
@@ -97,25 +98,27 @@ $maxUpload = min((int)ini_get('upload_max_filesize'), (int)ini_get('post_max_siz
                 <p class="text-muted">No releases uploaded yet.</p>
                 <?php else: ?>
                 <table class="data-table">
-                    <thead><tr><th>Type</th><th>Version</th><th>File</th><th>Size</th><th>SHA-256</th><th>Status</th><th>Downloads</th><th>Actions</th></tr></thead>
+                    <thead><tr><th>Type</th><th>Version</th><th>File</th><th>Size</th><th>SHA-256</th><th>Status</th><th>Downloads</th><th>Date</th><th>Actions</th></tr></thead>
                     <tbody>
                     <?php foreach ($releases as $r): ?>
                     <tr>
                         <td><span class="badge"><?= htmlspecialchars($r['product_type']) ?></span></td>
                         <td><?= htmlspecialchars($r['version']) ?></td>
-                        <td title="<?= htmlspecialchars($r['filename_original']) ?>"><?= htmlspecialchars(substr($r['filename_original'], 0, 25)) ?></td>
+                        <td title="Stored: <?= htmlspecialchars($r['filename_stored']) ?>"><?= htmlspecialchars(substr($r['filename_original'], 0, 25)) ?></td>
                         <td><?= number_format($r['file_size'] / 1048576, 1) ?> MB</td>
                         <td><code title="<?= htmlspecialchars($r['sha256_checksum']) ?>"><?= substr($r['sha256_checksum'], 0, 12) ?>…</code></td>
                         <td><span class="badge badge-<?= $r['is_active'] ? 'active' : 'suspended' ?>"><?= $r['is_active'] ? 'Active' : 'Inactive' ?></span></td>
                         <td><?= (int)$r['download_count'] ?></td>
+                        <td><?= date('M j, Y', strtotime($r['created_at'])) ?></td>
                         <td style="white-space:nowrap;">
-                            <form method="POST" action="<?= APP_URL ?>/admin/releasesToggle" style="display:inline;">
+                            <button class="btn btn-sm btn-ghost" onclick="navigator.clipboard.writeText('<?= APP_URL ?>/downloads/file/<?= $r['id'] ?>');this.textContent='Copied!';setTimeout(()=>this.textContent='URL',1500)" title="Copy public download URL">URL</button>
+                            <form method="POST" action="<?= APP_URL ?>/admin/releases/toggle" style="display:inline;">
                                 <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
                                 <input type="hidden" name="id" value="<?= $r['id'] ?>">
                                 <input type="hidden" name="active" value="<?= $r['is_active'] ? '0' : '1' ?>">
                                 <button type="submit" class="btn btn-sm btn-ghost"><?= $r['is_active'] ? 'Disable' : 'Enable' ?></button>
                             </form>
-                            <form method="POST" action="<?= APP_URL ?>/admin/releasesDelete" style="display:inline;" onsubmit="return confirm('Delete this release permanently?')">
+                            <form method="POST" action="<?= APP_URL ?>/admin/releases/delete" style="display:inline;" onsubmit="return confirm('Delete this release permanently?')">
                                 <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
                                 <input type="hidden" name="id" value="<?= $r['id'] ?>">
                                 <button type="submit" class="btn btn-sm btn-danger">Delete</button>

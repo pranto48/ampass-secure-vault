@@ -223,9 +223,18 @@ class AdminController {
 
     // ================================================================
     // RELEASE DOWNLOADS MANAGEMENT
+    // Routes: /admin/releases, /admin/releases/upload, /admin/releases/toggle, /admin/releases/delete
     // ================================================================
 
-    public function releases(): void {
+    public function releases(?string $subAction = null): void {
+        // Sub-route dispatch for /admin/releases/{action}
+        switch ($subAction) {
+            case 'upload': $this->releasesUpload(); return;
+            case 'toggle': $this->releasesToggle(); return;
+            case 'delete': $this->releasesDelete(); return;
+        }
+
+        // Default: list releases
         $releases = Database::fetchAll(
             "SELECT * FROM release_downloads ORDER BY created_at DESC"
         );
@@ -283,6 +292,22 @@ class AdminController {
         $allowedExtensions = ['exe', 'msi', 'zip', 'xpi'];
         if (!in_array($extension, $allowedExtensions, true)) {
             Session::flash('error', 'File type not allowed. Only .exe, .msi, .zip, .xpi are accepted.');
+            header('Location: ' . APP_URL . '/admin/releases');
+            exit;
+        }
+
+        // SECURITY: Enforce product type to file extension mapping
+        $typeExtensionMap = [
+            'windows_exe' => ['exe'],
+            'windows_msi' => ['msi'],
+            'chrome_extension' => ['zip'],
+            'edge_extension' => ['zip'],
+            'firefox_extension' => ['xpi', 'zip'],
+            'pwa' => ['zip']
+        ];
+        $allowedForType = $typeExtensionMap[$productType] ?? [];
+        if (!in_array($extension, $allowedForType, true)) {
+            Session::flash('error', 'Selected product type does not match uploaded file extension. Expected: .' . implode(' or .', $allowedForType));
             header('Location: ' . APP_URL . '/admin/releases');
             exit;
         }
@@ -405,13 +430,18 @@ class AdminController {
 
         $release = Database::fetchOne("SELECT * FROM release_downloads WHERE id = ?", [$id]);
         if ($release) {
-            // Delete stored file
-            $filePath = __DIR__ . '/../../' . $release['file_path'];
-            if (file_exists($filePath)) {
+            // SECURITY: Validate file path stays inside app_storage/releases before unlinking
+            $baseDir = realpath(__DIR__ . '/../../app_storage/releases');
+            $filePath = realpath(__DIR__ . '/../../' . $release['file_path']);
+
+            if ($baseDir && $filePath && strpos($filePath, $baseDir) === 0) {
                 @unlink($filePath);
+            } else {
+                // Path invalid or outside allowed directory — log warning, skip file delete
+                error_log("AMPass: Release delete skipped file unlink — path outside app_storage/releases (id={$id})");
             }
 
-            // Delete DB record
+            // Delete DB record regardless
             Database::execute("DELETE FROM release_downloads WHERE id = ?", [$id]);
 
             AuditLog::log('release_deleted', Session::getUserId(), 'release', $id, [

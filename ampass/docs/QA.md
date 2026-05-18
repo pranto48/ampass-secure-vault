@@ -107,3 +107,9 @@
 - [ ] No plaintext in audit_logs.details
 - [ ] Session regenerated after login
 - [ ] Vault auto-locks after timeout
+- [ ] All authenticated /api/extension/* endpoints reject HTTP (except localhost)
+- [ ] Release delete cannot unlink files outside app_storage/releases
+- [ ] Product type/file extension mismatch is rejected on upload
+- [ ] Inactive release returns 404 on public download
+- [ ] Public /downloads page shows only active releases
+- [ ] Copy download URL button works in admin releases page
