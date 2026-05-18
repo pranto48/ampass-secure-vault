@@ -52,9 +52,11 @@ class ExtensionApiController {
     }
 
     /**
-     * Require authentication or return 401
+     * Require authentication or return 401.
+     * Also enforces HTTPS on all authenticated endpoints.
      */
     private function requireAuth(): bool {
+        if (!$this->requireHTTPS()) return false;
         if (!$this->authenticate()) {
             http_response_code(401);
             echo json_encode(['error' => 'Invalid or expired token', 'code' => 'AUTH_REQUIRED']);
@@ -326,7 +328,6 @@ class ExtensionApiController {
         }
 
         if (!$this->requireAuth()) return;
-        if (!$this->requireHTTPS()) return;
         if (!$this->rateLimit('vault_init', 5, 300)) return;
 
         // Verify user is active

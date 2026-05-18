@@ -17,13 +17,26 @@
 
 ## Admin Upload (when implemented)
 
-- [ ] Admin can access release management page
-- [ ] Upload generates SHA-256 checksum
-- [ ] Upload detects file size
-- [ ] Upload stores file with random filename
-- [ ] Only .exe, .msi, .zip, .xpi extensions allowed
+- [ ] Admin can access `/admin/releases` page
+- [ ] Admin can upload .exe file
+- [ ] Admin can upload .msi file
+- [ ] Admin can upload .zip file
+- [ ] Admin can upload .xpi file
+- [ ] Upload of .php file is rejected
+- [ ] Upload of .js file is rejected
+- [ ] Upload of .html file is rejected
+- [ ] Upload of .svg file is rejected
+- [ ] Upload of .sh/.bat/.ps1 file is rejected
+- [ ] SHA-256 checksum is generated after upload
+- [ ] File size is calculated after upload
+- [ ] Stored filename is random (not original)
 - [ ] CSRF token required on upload form
-- [ ] Non-admin cannot upload
+- [ ] Non-admin cannot access /admin/releases
+- [ ] Admin can enable/disable release
+- [ ] Admin can delete release (removes file + DB row)
+- [ ] Download count increments on public download
+- [ ] Inactive file returns 404 on public download
+- [ ] Direct access to `app_storage/releases/` returns 403
 
 ## Admin Management
 

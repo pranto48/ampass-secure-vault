@@ -5,6 +5,7 @@
 - [ ] `cargo tauri dev` starts without errors
 - [ ] `cargo tauri build` produces .exe and .msi in bundle/
 - [ ] App launches on Windows 10/11
+- [ ] Opening index.html in browser (without Tauri) shows friendly message, does not crash
 
 ## Connection
 
@@ -21,10 +22,13 @@
 
 ## Vault Unlock
 
-- [ ] First-time vault initialization works (needs_setup=true)
+- [ ] First-time vault initialization works (needs_setup=true detected)
+- [ ] Vault init sends encrypted key to /api/extension/vault/init-key
 - [ ] Normal unlock with master password works
 - [ ] Wrong master password shows error
 - [ ] Vault key stored in memory only (not on disk)
+- [ ] searchKey derived from vault key after unlock
+- [ ] searchKey cleared on lock/logout/wipe
 
 ## Vault Display
 
@@ -75,6 +79,9 @@
 - [ ] cache.enc is encrypted (not readable as JSON)
 - [ ] Closing app clears vault key
 - [ ] config.json only contains server URL (non-secret)
+- [ ] All authenticated extension API endpoints reject HTTP (except localhost)
+- [ ] searchKey is null after lock/logout/wipe
+- [ ] derivationParams cleared on logout
 
 ## ⚠️ Not Production Ready
 

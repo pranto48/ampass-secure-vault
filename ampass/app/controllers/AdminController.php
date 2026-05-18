@@ -220,4 +220,207 @@ class AdminController {
         header('Location: ' . APP_URL . '/admin/extensions');
         exit;
     }
+
+    // ================================================================
+    // RELEASE DOWNLOADS MANAGEMENT
+    // ================================================================
+
+    public function releases(): void {
+        $releases = Database::fetchAll(
+            "SELECT * FROM release_downloads ORDER BY created_at DESC"
+        );
+
+        $settingsRows = Database::fetchAll(
+            "SELECT setting_key, setting_value FROM app_settings WHERE setting_key = 'downloads_enabled'"
+        );
+        $settings = [];
+        foreach ($settingsRows as $s) $settings[$s['setting_key']] = $s['setting_value'];
+
+        $data = [
+            'releases' => $releases,
+            'settings' => $settings,
+            'csrfToken' => CSRF::generateToken()
+        ];
+
+        require __DIR__ . '/../views/admin/releases.php';
+    }
+
+    public function releasesUpload(): void {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            header('Location: ' . APP_URL . '/admin/releases');
+            exit;
+        }
+        CSRF::validateOrFail();
+
+        // Validate product type
+        $allowedTypes = ['windows_exe', 'windows_msi', 'chrome_extension', 'edge_extension', 'firefox_extension', 'pwa'];
+        $productType = $_POST['product_type'] ?? '';
+        if (!in_array($productType, $allowedTypes, true)) {
+            Session::flash('error', 'Invalid product type.');
+            header('Location: ' . APP_URL . '/admin/releases');
+            exit;
+        }
+
+        $version = trim($_POST['version'] ?? '');
+        if (empty($version) || !preg_match('/^[0-9a-zA-Z.\-]+$/', $version)) {
+            Session::flash('error', 'Invalid version format.');
+            header('Location: ' . APP_URL . '/admin/releases');
+            exit;
+        }
+
+        // Validate file upload
+        if (!isset($_FILES['release_file']) || $_FILES['release_file']['error'] !== UPLOAD_ERR_OK) {
+            Session::flash('error', 'File upload failed. Error code: ' . ($_FILES['release_file']['error'] ?? 'none'));
+            header('Location: ' . APP_URL . '/admin/releases');
+            exit;
+        }
+
+        $file = $_FILES['release_file'];
+        $originalName = basename($file['name']);
+        $extension = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+
+        // SECURITY: Strict extension allowlist
+        $allowedExtensions = ['exe', 'msi', 'zip', 'xpi'];
+        if (!in_array($extension, $allowedExtensions, true)) {
+            Session::flash('error', 'File type not allowed. Only .exe, .msi, .zip, .xpi are accepted.');
+            header('Location: ' . APP_URL . '/admin/releases');
+            exit;
+        }
+
+        // SECURITY: Block dangerous extensions even if disguised
+        $dangerousPatterns = ['php', 'phtml', 'phar', 'js', 'html', 'htm', 'svg', 'sh', 'bat', 'cmd', 'ps1', 'htaccess'];
+        foreach ($dangerousPatterns as $pattern) {
+            if (stripos($originalName, '.' . $pattern) !== false) {
+                Session::flash('error', 'Dangerous file type rejected.');
+                header('Location: ' . APP_URL . '/admin/releases');
+                exit;
+            }
+        }
+
+        // Generate random stored filename
+        $storedFilename = bin2hex(random_bytes(16)) . '.' . $extension;
+        $storageDir = __DIR__ . '/../../app_storage/releases';
+
+        // Ensure storage directory exists
+        if (!is_dir($storageDir)) {
+            mkdir($storageDir, 0755, true);
+        }
+
+        $destPath = $storageDir . '/' . $storedFilename;
+
+        // Move uploaded file
+        if (!move_uploaded_file($file['tmp_name'], $destPath)) {
+            Session::flash('error', 'Failed to store file. Check directory permissions.');
+            header('Location: ' . APP_URL . '/admin/releases');
+            exit;
+        }
+
+        // SECURITY: Verify stored path is inside app_storage/releases
+        $realDest = realpath($destPath);
+        $realBase = realpath($storageDir);
+        if (!$realDest || !$realBase || strpos($realDest, $realBase) !== 0) {
+            @unlink($destPath);
+            Session::flash('error', 'File path validation failed.');
+            header('Location: ' . APP_URL . '/admin/releases');
+            exit;
+        }
+
+        // Calculate checksum and size
+        $sha256 = hash_file('sha256', $destPath);
+        $fileSize = filesize($destPath);
+        $mimeType = mime_content_type($destPath) ?: 'application/octet-stream';
+        $releaseNotes = trim($_POST['release_notes'] ?? '');
+
+        // Insert into database
+        Database::insert(
+            "INSERT INTO release_downloads (product_type, version, filename_original, filename_stored, file_path, file_size, sha256_checksum, mime_type, release_notes, is_active, created_by_user_id, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NOW())",
+            [
+                $productType,
+                $version,
+                $originalName,
+                $storedFilename,
+                'app_storage/releases/' . $storedFilename,
+                $fileSize,
+                $sha256,
+                $mimeType,
+                $releaseNotes,
+                Session::getUserId()
+            ]
+        );
+
+        AuditLog::log('release_uploaded', Session::getUserId(), 'release', null, [
+            'product' => $productType, 'version' => $version, 'file' => $originalName
+        ]);
+
+        Session::flash('success', "Release uploaded: {$originalName} (v{$version}, SHA-256: " . substr($sha256, 0, 12) . "…)");
+        header('Location: ' . APP_URL . '/admin/releases');
+        exit;
+    }
+
+    public function releasesToggle(): void {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            header('Location: ' . APP_URL . '/admin/releases');
+            exit;
+        }
+        CSRF::validateOrFail();
+
+        // Toggle downloads_enabled setting
+        if (isset($_POST['setting']) && $_POST['setting'] === 'downloads_enabled') {
+            $value = $_POST['value'] === '1' ? '1' : '0';
+            Database::execute(
+                "INSERT INTO app_settings (setting_key, setting_value) VALUES ('downloads_enabled', ?) ON DUPLICATE KEY UPDATE setting_value = ?",
+                [$value, $value]
+            );
+            AuditLog::log($value === '1' ? 'downloads_enabled' : 'downloads_disabled', Session::getUserId());
+            header('Location: ' . APP_URL . '/admin/releases');
+            exit;
+        }
+
+        // Toggle individual release active status
+        $id = (int)($_POST['id'] ?? 0);
+        $active = (int)($_POST['active'] ?? 0);
+        if ($id) {
+            Database::execute("UPDATE release_downloads SET is_active = ?, updated_at = NOW() WHERE id = ?", [$active, $id]);
+            AuditLog::log($active ? 'release_enabled' : 'release_disabled', Session::getUserId(), 'release', $id);
+            Session::flash('success', 'Release ' . ($active ? 'enabled' : 'disabled') . '.');
+        }
+
+        header('Location: ' . APP_URL . '/admin/releases');
+        exit;
+    }
+
+    public function releasesDelete(): void {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            header('Location: ' . APP_URL . '/admin/releases');
+            exit;
+        }
+        CSRF::validateOrFail();
+
+        $id = (int)($_POST['id'] ?? 0);
+        if (!$id) {
+            header('Location: ' . APP_URL . '/admin/releases');
+            exit;
+        }
+
+        $release = Database::fetchOne("SELECT * FROM release_downloads WHERE id = ?", [$id]);
+        if ($release) {
+            // Delete stored file
+            $filePath = __DIR__ . '/../../' . $release['file_path'];
+            if (file_exists($filePath)) {
+                @unlink($filePath);
+            }
+
+            // Delete DB record
+            Database::execute("DELETE FROM release_downloads WHERE id = ?", [$id]);
+
+            AuditLog::log('release_deleted', Session::getUserId(), 'release', $id, [
+                'product' => $release['product_type'], 'version' => $release['version']
+            ]);
+            Session::flash('success', 'Release deleted.');
+        }
+
+        header('Location: ' . APP_URL . '/admin/releases');
+        exit;
+    }
 }

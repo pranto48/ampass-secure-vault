@@ -5,13 +5,27 @@
 (function() {
   'use strict';
 
+  // ===== Tauri Availability Check =====
+  if (!window.__TAURI__ || !window.__TAURI__.core) {
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('app').innerHTML = `
+        <div class="auth-screen" style="display:flex;">
+          <div class="auth-card">
+            <h2 class="auth-title">AMPass Desktop</h2>
+            <p class="auth-sub">This application requires the Tauri desktop runtime.</p>
+            <p style="font-size:12px;color:#64748b;margin-top:12px;">To run in development:<br><code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;">cargo tauri dev</code></p>
+          </div>
+        </div>`;
+    });
+    return; // Stop execution — not in Tauri
+  }
+
   const { invoke } = window.__TAURI__.core;
   const { listen } = window.__TAURI__.event;
 
   let vaultKeyHex = null;
   let vaultItems = [];
   let derivationParams = null;
-  let hmacKey = null;
   let searchKey = null; // Derived from vault key for title_hash/url_hash
   let allDecrypted = [];
 
@@ -282,7 +296,7 @@
   });
 
   // ===== Lock =====
-  document.getElementById('btnLockVault').addEventListener('click', async () => { vaultKeyHex = null; allDecrypted = []; await invoke('lock_vault'); showAuth('viewUnlock'); });
+  document.getElementById('btnLockVault').addEventListener('click', async () => { vaultKeyHex = null; searchKey = null; allDecrypted = []; await invoke('lock_vault'); showAuth('viewUnlock'); });
 
   // ===== Sync =====
   document.getElementById('btnSyncNow').addEventListener('click', loadVault);
@@ -302,13 +316,13 @@
   document.getElementById('btnCopyGen').addEventListener('click', async () => { await navigator.clipboard.writeText(document.getElementById('genPw').value); toast('Copied!'); });
 
   // ===== Settings =====
-  document.getElementById('btnLogout').addEventListener('click', async () => { try { await Api.logout(); } catch {} await invoke('logout'); vaultKeyHex = null; allDecrypted = []; Api.token = ''; showAuth('viewLogin'); });
-  document.getElementById('btnWipeCache').addEventListener('click', async () => { if (!confirm('Wipe all local data?')) return; await invoke('wipe_local_data'); vaultKeyHex = null; allDecrypted = []; showAuth('viewWelcome'); });
+  document.getElementById('btnLogout').addEventListener('click', async () => { try { await Api.logout(); } catch {} await invoke('logout'); vaultKeyHex = null; searchKey = null; allDecrypted = []; derivationParams = null; Api.token = ''; showAuth('viewLogin'); });
+  document.getElementById('btnWipeCache').addEventListener('click', async () => { if (!confirm('Wipe all local data?')) return; await invoke('wipe_local_data'); vaultKeyHex = null; searchKey = null; allDecrypted = []; derivationParams = null; showAuth('viewWelcome'); });
   document.getElementById('btnExportBackup').addEventListener('click', async () => { const data = JSON.stringify({ version: '1.0', exported_at: new Date().toISOString(), items: vaultItems }); await invoke('pick_save_location', { data }); toast('Backup exported'); });
 
   // ===== Tauri Events =====
-  listen('tray-lock', async () => { vaultKeyHex = null; allDecrypted = []; await invoke('lock_vault'); showAuth('viewUnlock'); });
-  listen('auto-locked', () => { vaultKeyHex = null; allDecrypted = []; showAuth('viewUnlock'); });
+  listen('tray-lock', async () => { vaultKeyHex = null; searchKey = null; allDecrypted = []; await invoke('lock_vault'); showAuth('viewUnlock'); });
+  listen('auto-locked', () => { vaultKeyHex = null; searchKey = null; allDecrypted = []; showAuth('viewUnlock'); });
 
   // ===== Helpers =====
   function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
