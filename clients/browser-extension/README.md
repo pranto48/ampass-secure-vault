@@ -65,6 +65,23 @@ Before the extension can connect, ensure:
 - **Clipboard access**: Copied passwords remain in clipboard until cleared (default 30 seconds).
 - **Service worker lifecycle**: Chrome may terminate the service worker after inactivity. The vault key persists in `chrome.storage.session` and is restored on wake.
 
+## ⚠️ Security Warning
+
+**This password manager and extension must be professionally audited before storing real production credentials.** See `SECURITY.md` for the full security audit checklist, known limitations, and manual test procedures.
+
+## Manual Security Test Checklist
+
+| # | Test | Expected Result |
+|---|------|-----------------|
+| 1 | Navigate to wrong domain, try autofill | No matches shown, autofill blocked |
+| 2 | Navigate to HTTP page (not localhost) | Warning shown, autofill blocked by default |
+| 3 | Lock vault, try to access items | Unlock screen shown, no data accessible |
+| 4 | Revoke device from AMPass admin | Extension gets 401, shows login screen |
+| 5 | Copy password, wait 30 seconds | Clipboard auto-cleared |
+| 6 | Close browser, reopen | Session storage empty, must re-authenticate |
+| 7 | Submit login form manually | Save prompt appears, requires confirmation |
+| 8 | Export vault backup, inspect file | All data is encrypted ciphertext, no plaintext |
+
 ## How to Test Autofill/Autosave
 
 1. Load the extension in Chrome/Edge

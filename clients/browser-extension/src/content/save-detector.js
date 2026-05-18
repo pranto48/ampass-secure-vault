@@ -197,15 +197,16 @@
     lastSubmittedData = null;
   });
 
-  // Inject Security helper for escapeHtml
-  if (typeof Security === 'undefined') {
-    window.Security = {
-      escapeHtml(str) {
-        if (!str) return '';
-        const div = document.createElement('div');
-        div.textContent = str;
-        return div.innerHTML;
-      }
+  // Inject Security helper for escapeHtml (local to IIFE, not exposed to page)
+  const _escapeHtml = (function() {
+    const div = document.createElement('div');
+    return function(str) {
+      if (!str) return '';
+      div.textContent = str;
+      return div.innerHTML;
     };
-  }
+  })();
+
+  // Use local reference instead of window.Security
+  const Security = { escapeHtml: _escapeHtml };
 })();

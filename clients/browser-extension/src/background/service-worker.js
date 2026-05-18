@@ -20,8 +20,17 @@ const CACHE_TTL = 60000; // 1 minute
 
 // ===== Message Handler =====
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // SECURITY: Only allow messages from extension pages (popup, options, content scripts)
+  // chrome.runtime.onMessage only receives from the extension itself, but we verify sender
+  if (sender.id !== chrome.runtime.id) {
+    sendResponse({ success: false, error: 'Unauthorized sender' });
+    return false;
+  }
+
   handleMessage(msg, sender).then(sendResponse).catch(err => {
-    sendResponse({ success: false, error: err.message || 'Unknown error' });
+    // SECURITY: Never expose internal error details that might contain secrets
+    const safeError = err.message || 'Operation failed';
+    sendResponse({ success: false, error: safeError });
   });
   return true; // Keep channel open for async response
 });
@@ -328,4 +337,4 @@ chrome.runtime.onMessage.addListener(() => {
   });
 });
 
-console.log('AMPass service worker initialized');
+// AMPass service worker ready

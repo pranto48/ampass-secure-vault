@@ -11,6 +11,25 @@
   // Listen for autofill commands from popup/service worker
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'AUTOFILL') {
+      // SECURITY: Verify this is a safe context for autofill
+      const url = window.location.href;
+      const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1|::1)/i.test(url);
+      const isHttps = url.startsWith('https://');
+
+      if (!isHttps && !isLocalhost) {
+        // Check if user explicitly allowed HTTP autofill
+        chrome.storage.local.get('settings', (result) => {
+          const settings = result.settings || {};
+          if (!settings.allowHttpAutofill) {
+            sendResponse({ success: false, error: 'Autofill blocked on HTTP page' });
+            return;
+          }
+          performAutofill(msg.payload);
+          sendResponse({ success: true });
+        });
+        return true; // async response
+      }
+
       performAutofill(msg.payload);
       sendResponse({ success: true });
     }
