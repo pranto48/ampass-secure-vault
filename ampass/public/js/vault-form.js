@@ -184,9 +184,10 @@
                 isWeak = passwordStrength < 40 ? 1 : 0;
             }
 
-            // Compute searchable hashes
-            const titleHash = await AMPassCrypto.computeHMAC(formData.title);
-            const urlHash = formData.url ? await AMPassCrypto.computeHMAC(formData.url) : null;
+            // Compute searchable hashes using server-provided HMAC key
+            const hmacKey = window.AMPass?.hmacKey || 'ampass-default-hmac';
+            const titleHash = await AMPassCrypto.computeHMAC(formData.title, hmacKey);
+            const urlHash = formData.url ? await AMPassCrypto.computeHMAC(formData.url, hmacKey) : null;
 
             // Send to server
             const payload = {

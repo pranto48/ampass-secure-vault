@@ -7,9 +7,11 @@
  * Ensure .htaccess is properly configured to route all traffic here.
  */
 
-// Check if installed
+// Check if installed — redirect to installer if config doesn't exist
 if (!file_exists(__DIR__ . '/config/config.php')) {
-    header('Location: /install/index.php');
+    // Use relative redirect so it works in any subdirectory (XAMPP, cPanel, etc.)
+    $scriptDir = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/');
+    header('Location: ' . $scriptDir . '/install/index.php');
     exit;
 }
 

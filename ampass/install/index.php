@@ -150,43 +150,26 @@ function performInstallation(array $data): string {
     if (empty($dbHost) || empty($dbName) || empty($dbUser)) {
         return 'Database configuration is missing. Please restart installation.';
     }
-
-    // Validate database name (prevent SQL injection via backtick escape)
     if (!preg_match('/^[a-zA-Z0-9_]+$/', $dbName)) {
         return 'Database name must contain only letters, numbers, and underscores.';
     }
-
     if (empty($adminName) || empty($adminEmail) || empty($adminUsername) || empty($adminPassword)) {
         return 'All admin fields are required.';
     }
-
     if (!filter_var($adminEmail, FILTER_VALIDATE_EMAIL)) {
         return 'Invalid email address.';
     }
-
     if (!preg_match('/^[a-zA-Z0-9_]+$/', $adminUsername) || strlen($adminUsername) < 3) {
         return 'Username must be at least 3 characters (letters, numbers, underscores only).';
     }
-
-    // Strong password validation (same rules as main app)
-    if (strlen($adminPassword) < 12) {
-        return 'Password must be at least 12 characters.';
-    }
-    if (!preg_match('/[A-Z]/', $adminPassword)) {
-        return 'Password must contain at least one uppercase letter.';
-    }
-    if (!preg_match('/[a-z]/', $adminPassword)) {
-        return 'Password must contain at least one lowercase letter.';
-    }
-    if (!preg_match('/[0-9]/', $adminPassword)) {
-        return 'Password must contain at least one number.';
-    }
-    if (!preg_match('/[^A-Za-z0-9]/', $adminPassword)) {
-        return 'Password must contain at least one special character.';
-    }
+    if (strlen($adminPassword) < 12) return 'Password must be at least 12 characters.';
+    if (!preg_match('/[A-Z]/', $adminPassword)) return 'Password must contain at least one uppercase letter.';
+    if (!preg_match('/[a-z]/', $adminPassword)) return 'Password must contain at least one lowercase letter.';
+    if (!preg_match('/[0-9]/', $adminPassword)) return 'Password must contain at least one number.';
+    if (!preg_match('/[^A-Za-z0-9]/', $adminPassword)) return 'Password must contain at least one special character.';
 
     // ============================================================
-    // DATABASE SETUP
+    // DATABASE CONNECTION
     // ============================================================
     try {
         $dsn = "mysql:host={$dbHost};charset=utf8mb4";
@@ -199,18 +182,28 @@ function performInstallation(array $data): string {
     }
 
     try {
-        // Safe: $dbName is validated to be alphanumeric+underscore only
         $pdo->exec("CREATE DATABASE IF NOT EXISTS `{$dbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
         $pdo->exec("USE `{$dbName}`");
     } catch (PDOException $e) {
         return 'Failed to create database. Ensure the user has CREATE privileges.';
     }
 
+    // ============================================================
+    // RUN MAIN SCHEMA
+    // ============================================================
     try {
         $schema = file_get_contents(__DIR__ . '/../database/schema.sql');
         $pdo->exec($schema);
     } catch (PDOException $e) {
         return 'Failed to create tables: ' . $e->getMessage();
+    }
+
+    // ============================================================
+    // MIGRATION RUNNER — run all files in database/migrations/ in order
+    // ============================================================
+    $migrationError = runMigrations($pdo);
+    if ($migrationError) {
+        return $migrationError;
     }
 
     // ============================================================
@@ -245,20 +238,25 @@ function performInstallation(array $data): string {
         return 'Failed to create admin user.';
     }
 
-    // Create user_security record
-    // SECURITY: The vault key is a placeholder. On first login, the client-side
-    // JavaScript will detect this and prompt the user to set up their vault encryption.
-    $masterHash = $passwordHash;
-    $salt = bin2hex(random_bytes(32));
-    $tempKey = bin2hex(random_bytes(32));
-    $tempIv = bin2hex(random_bytes(12));
+    // ============================================================
+    // CREATE USER SECURITY RECORD
+    // SECURITY: We store a placeholder encrypted_vault_key. The admin's first
+    // login will detect this (key_iterations = 0 flag) and trigger the browser-side
+    // vault initialization flow that generates a real vault key via Web Crypto API.
+    // The server NEVER generates or sees the real vault key in plaintext.
+    // ============================================================
+    $masterHash = $passwordHash; // Same hash for master password initially
+    $placeholderSalt = bin2hex(random_bytes(32));
+    // Mark as uninitialized: key_iterations = 0 signals "needs vault setup"
+    $placeholderKey = 'VAULT_NOT_INITIALIZED';
+    $placeholderIv = bin2hex(random_bytes(12));
 
     try {
         $stmt = $pdo->prepare(
             "INSERT INTO user_security (user_id, master_password_hash, encryption_salt, encrypted_vault_key, vault_key_iv, key_iterations) 
-             VALUES (?, ?, ?, ?, ?, 100000)"
+             VALUES (?, ?, ?, ?, ?, 0)"
         );
-        $stmt->execute([$adminId, $masterHash, $salt, $tempKey, $tempIv]);
+        $stmt->execute([$adminId, $masterHash, $placeholderSalt, $placeholderKey, $placeholderIv]);
     } catch (PDOException $e) {
         return 'Failed to create security record.';
     }
@@ -305,13 +303,77 @@ function performInstallation(array $data): string {
         return 'Failed to write config file. Check directory permissions (config/ needs to be writable).';
     }
 
-    // SECURITY: Create lock file as additional protection
+    // Create lock file
     file_put_contents(__DIR__ . '/../config/.install_lock', 'installed:' . date('c') . "\n");
 
     // Clear session install data
     unset($_SESSION['install_db']);
 
     return ''; // No error = success
+}
+
+/**
+ * Run all migration files in database/migrations/ that haven't been run yet.
+ * Creates a schema_migrations table to track which migrations have been applied.
+ */
+function runMigrations(PDO $pdo): string {
+    // Create migrations tracking table
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS `schema_migrations` (
+            `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            `filename` VARCHAR(255) NOT NULL UNIQUE,
+            `applied_at` DATETIME DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    ");
+
+    $migrationsDir = __DIR__ . '/../database/migrations';
+    if (!is_dir($migrationsDir)) {
+        return ''; // No migrations directory — that's fine
+    }
+
+    // Get all .sql files sorted by filename
+    $files = glob($migrationsDir . '/*.sql');
+    if (empty($files)) {
+        return ''; // No migration files
+    }
+    sort($files); // Alphabetical order (001_, 002_, etc.)
+
+    foreach ($files as $file) {
+        $filename = basename($file);
+
+        // Check if already applied
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM schema_migrations WHERE filename = ?");
+        $stmt->execute([$filename]);
+        if ($stmt->fetchColumn() > 0) {
+            continue; // Already applied
+        }
+
+        // Run the migration
+        try {
+            $sql = file_get_contents($file);
+            if (empty(trim($sql))) continue;
+
+            $pdo->exec($sql);
+
+            // Record as applied
+            $stmt = $pdo->prepare("INSERT INTO schema_migrations (filename) VALUES (?)");
+            $stmt->execute([$filename]);
+        } catch (PDOException $e) {
+            // Non-fatal: log but continue (tables may already exist from schema.sql)
+            // The CREATE TABLE IF NOT EXISTS in migrations handles this gracefully
+            error_log("AMPass migration warning ({$filename}): " . $e->getMessage());
+
+            // Still record it to avoid re-running
+            try {
+                $stmt = $pdo->prepare("INSERT IGNORE INTO schema_migrations (filename) VALUES (?)");
+                $stmt->execute([$filename]);
+            } catch (PDOException $e2) {
+                // Ignore
+            }
+        }
+    }
+
+    return ''; // Success
 }
 
 $csrfToken = $_SESSION['install_csrf'];

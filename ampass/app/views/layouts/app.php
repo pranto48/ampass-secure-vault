@@ -196,6 +196,7 @@ $csrfToken = CSRF::generateToken();
         window.AMPass = {
             baseUrl: '<?= APP_URL ?>',
             csrfToken: '<?= $csrfToken ?>',
+            hmacKey: '<?= defined("APP_SECRET") ? substr(APP_SECRET, 0, 32) : "ampass-default-hmac" ?>',
             vaultUnlocked: <?= Session::isVaultUnlocked() ? 'true' : 'false' ?>,
             lockTimeout: <?= defined('VAULT_LOCK_TIMEOUT') ? VAULT_LOCK_TIMEOUT : 300 ?>
         };

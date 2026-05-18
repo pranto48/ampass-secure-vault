@@ -556,7 +556,7 @@ class ExtensionApiController {
             [$this->userId, $urlHash]
         );
 
-        ExtensionAudit::log('autofill_used', $this->userId, $this->deviceId, null, null, [
+        ExtensionAudit::log('autofill_matches_requested', $this->userId, $this->deviceId, null, null, [
             'matches' => count($items)
         ]);
 

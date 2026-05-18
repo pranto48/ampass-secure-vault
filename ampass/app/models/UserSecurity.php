@@ -103,18 +103,21 @@ class UserSecurity {
 
     /**
      * Get encryption parameters needed by client for key derivation
-     * SECURITY: Only returns salt and iterations - never the encrypted key directly
-     * without proper authentication.
+     * Returns null if user has no security record.
+     * Returns with 'needs_setup' = true if vault is not yet initialized (key_iterations = 0).
      */
     public static function getDerivationParams(int $userId): ?array {
         $security = self::findByUserId($userId);
         if (!$security) return null;
 
+        $iterations = (int) $security['key_iterations'];
+
         return [
             'encryption_salt' => $security['encryption_salt'],
-            'key_iterations' => (int) $security['key_iterations'],
+            'key_iterations' => $iterations,
             'encrypted_vault_key' => $security['encrypted_vault_key'],
-            'vault_key_iv' => $security['vault_key_iv']
+            'vault_key_iv' => $security['vault_key_iv'],
+            'needs_setup' => ($iterations === 0 || $security['encrypted_vault_key'] === 'VAULT_NOT_INITIALIZED')
         ];
     }
 }

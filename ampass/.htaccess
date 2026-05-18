@@ -1,62 +1,75 @@
 # AMPass - Apache Configuration
-# SECURITY: Ensure mod_rewrite is enabled
+# Compatible with XAMPP and cPanel shared hosting.
 
 RewriteEngine On
 
 # ============================================================
 # HTTPS ENFORCEMENT (UNCOMMENT FOR PRODUCTION - REQUIRED!)
-# A password manager MUST use HTTPS. Without it, master passwords
-# and session cookies can be intercepted by network attackers.
 # ============================================================
 # RewriteCond %{HTTPS} off
 # RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 
 # Prevent directory listing
-Options -Indexes -FollowSymLinks
+Options -Indexes
 
-# Prevent access to sensitive files
-<FilesMatch "\.(env|config|sql|md|json|lock|log|bak|inc|ini|sh|yml|yaml|toml|xml)$">
-    Order allow,deny
-    Deny from all
-</FilesMatch>
+# ============================================================
+# BLOCK SENSITIVE DIRECTORIES
+# ============================================================
 
-# Block access to hidden files (dotfiles)
-<FilesMatch "^\.">
-    Order allow,deny
-    Deny from all
-</FilesMatch>
-
-# Block access to config directory
+# Block direct access to config directory (always)
 RewriteRule ^config/ - [F,L]
 
-# Block access to app directory (except through front controller)
+# Block direct access to app directory
 RewriteRule ^app/ - [F,L]
 
-# Block access to database directory
+# Block direct access to database directory
 RewriteRule ^database/ - [F,L]
 
-# Block access to docs directory
+# Block direct access to docs directory
 RewriteRule ^docs/ - [F,L]
 
-# SECURITY: Install directory protection
-# The installer protects itself with 3 PHP-level checks:
-#   1. INSTALL_LOCKED constant in config.php
-#   2. config/.install_lock file existence check
-#   3. Rate limiting on installation attempts
-# After installation, DELETE the /install/ directory entirely for maximum security.
-# If you cannot delete it, the PHP checks will block access automatically.
+# ============================================================
+# INSTALL DIRECTORY — conditional access
+# Accessible ONLY when config/config.php does NOT exist (fresh install).
+# After installation, PHP-level locks block access even if directory remains.
+# Best practice: DELETE /install/ after setup.
+# ============================================================
+# Note: We do NOT block /install/ in .htaccess because Apache cannot
+# reliably check sibling file existence across all hosting environments.
+# The installer has 3 PHP-level locks (INSTALL_LOCKED, .install_lock, rate limit).
 
-# Block access to README and other documentation
+# ============================================================
+# BLOCK SENSITIVE FILES
+# ============================================================
+<FilesMatch "\.(env|sql|md|lock|log|bak|inc|ini|sh|yml|yaml|toml)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Block dotfiles (except .htaccess itself)
+<FilesMatch "^\.(?!htaccess)">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Block README
 RewriteRule ^README\.md$ - [F,L]
-RewriteRule ^\.gitignore$ - [F,L]
 
-# Allow static assets
-RewriteCond %{REQUEST_URI} ^/public/ [OR]
-RewriteCond %{REQUEST_URI} ^/manifest\.webmanifest$ [OR]
-RewriteCond %{REQUEST_URI} ^/sw\.js$
+# ============================================================
+# STATIC ASSETS — serve directly
+# ============================================================
+RewriteCond %{REQUEST_URI} ^(.*/)?public/ [OR]
+RewriteCond %{REQUEST_URI} ^(.*/)?install/ [OR]
+RewriteCond %{REQUEST_URI} \.(css|js|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|webmanifest)$ [NC]
 RewriteRule ^ - [L]
 
-# Route all other requests to index.php
+# Service worker must be served from root
+RewriteRule ^sw\.js$ - [L]
+RewriteRule ^manifest\.webmanifest$ - [L]
+
+# ============================================================
+# FRONT CONTROLLER — route everything else to index.php
+# ============================================================
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^(.*)$ index.php?route=$1 [QSA,L]
@@ -65,60 +78,32 @@ RewriteRule ^(.*)$ index.php?route=$1 [QSA,L]
 # SECURITY HEADERS
 # ============================================================
 <IfModule mod_headers.c>
-    # Prevent MIME type sniffing
     Header always set X-Content-Type-Options "nosniff"
-    
-    # Prevent clickjacking
     Header always set X-Frame-Options "DENY"
-    
-    # XSS protection (legacy browsers)
     Header always set X-XSS-Protection "1; mode=block"
-    
-    # Referrer policy
     Header always set Referrer-Policy "strict-origin-when-cross-origin"
-    
-    # Permissions policy - disable unnecessary APIs
-    Header always set Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()"
-    
-    # Cross-origin policies
+    Header always set Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
     Header always set Cross-Origin-Opener-Policy "same-origin"
-    Header always set Cross-Origin-Resource-Policy "same-origin"
     Header always set X-Permitted-Cross-Domain-Policies "none"
-    
-    # HSTS - Strict Transport Security (uncomment for production with HTTPS)
-    # Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-    
-    # Remove server version info
     Header always unset X-Powered-By
     Header always unset Server
+    # Uncomment for production HTTPS:
+    # Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
 </IfModule>
 
 # ============================================================
-# PHP SECURITY SETTINGS
+# PHP SETTINGS
 # ============================================================
 <IfModule mod_php.c>
-    # Secure session cookies
     php_value session.cookie_httponly 1
-    php_value session.cookie_secure 1
-    php_value session.cookie_samesite Strict
     php_value session.use_strict_mode 1
     php_value session.use_only_cookies 1
-    php_value session.use_trans_sid 0
-    
-    # Disable dangerous functions
     php_value expose_php Off
     php_value display_errors Off
     php_value log_errors On
-    
-    # Limit upload/post size
     php_value upload_max_filesize 10M
     php_value post_max_size 52M
-    php_value max_input_vars 1000
     php_value max_execution_time 30
 </IfModule>
 
-# Disable ETags (prevents inode-based fingerprinting)
-<IfModule mod_headers.c>
-    Header unset ETag
-</IfModule>
 FileETag None

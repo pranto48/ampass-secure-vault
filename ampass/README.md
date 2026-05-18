@@ -100,10 +100,43 @@ If the installer fails to create tables:
 1. Open phpMyAdmin
 2. Create a database named `ampass_db`
 3. Import `database/schema.sql`
-4. Copy `config/config.sample.php` to `config/config.php`
-5. Edit `config/config.php` with your database credentials
-6. Generate random keys using: `php -r "echo bin2hex(random_bytes(32));"`
-7. Create the lock file: `touch config/.install_lock`
+4. Import all files in `database/migrations/` in filename order
+5. Copy `config/config.sample.php` to `config/config.php`
+6. Edit `config/config.php` with your database credentials
+7. Generate random keys using: `php -r "echo bin2hex(random_bytes(32));"`
+8. Create the lock file: `touch config/.install_lock`
+
+## Database Migrations
+
+The installer automatically runs all `.sql` files in `database/migrations/` after the main schema. A `schema_migrations` table tracks which migrations have been applied to prevent duplicates.
+
+For upgrades: if you update AMPass files, new migration files will be applied automatically on next install run, or you can import them manually via phpMyAdmin.
+
+Current migrations:
+- `001_extension_tables.sql` — Browser extension API tables (devices, tokens, audit logs)
+
+## Browser Extension Setup
+
+AMPass includes a browser extension API. After installation:
+
+1. The extension tables are created automatically (no manual SQL import needed)
+2. Login as admin → **Admin Panel → Browser Extensions**
+3. Verify "Enable Extension API" is checked
+4. Configure "Allowed Extension Origins" for production (e.g., `chrome-extension://your-id`)
+5. Set token lifetime and max devices per user
+
+The extension API is at `/api/extension/` — see `docs/extension-api.md` for full documentation.
+
+## Admin Extension Settings
+
+These settings are created automatically during installation:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `extension_api_enabled` | `1` | Enable/disable the extension API |
+| `extension_allowed_origins` | *(empty)* | Comma-separated allowed extension origins |
+| `extension_token_lifetime_days` | `30` | How long extension tokens last |
+| `extension_max_devices_per_user` | `10` | Max extension devices per user |
 
 ## Why HTTPS is REQUIRED
 
