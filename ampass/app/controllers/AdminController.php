@@ -4,6 +4,9 @@
  * SECURITY: All admin routes require admin role verification.
  */
 
+require_once __DIR__ . '/../services/BackupService.php';
+require_once __DIR__ . '/../services/EmailService.php';
+
 require_once __DIR__ . '/../models/User.php';
 require_once __DIR__ . '/../models/AuditLog.php';
 require_once __DIR__ . '/../models/ExtensionDevice.php';
@@ -451,6 +454,179 @@ class AdminController {
         }
 
         header('Location: ' . APP_URL . '/admin/releases');
+        exit;
+    }
+
+    // ================================================================
+    // BACKUP MANAGEMENT
+    // Routes: /admin/backups, /admin/backups/create, /admin/backups/download, /admin/backups/delete
+    // ================================================================
+
+    public function backups(?string $subAction = null): void {
+        switch ($subAction) {
+            case 'create': $this->backupsCreate(); return;
+            case 'delete': $this->backupsDelete(); return;
+        }
+
+        // Handle download with ID in query
+        if (isset($_GET['download'])) {
+            $this->backupsDownload((int)$_GET['download']);
+            return;
+        }
+
+        $backups = Database::fetchAll("SELECT * FROM backup_files ORDER BY created_at DESC");
+        $data = ['backups' => $backups, 'csrfToken' => CSRF::generateToken()];
+        require __DIR__ . '/../views/admin/backups.php';
+    }
+
+    private function backupsCreate(): void {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . APP_URL . '/admin/backups'); exit; }
+        CSRF::validateOrFail();
+
+        $password = $_POST['backup_password'] ?? '';
+        $confirmPassword = $_POST['backup_password_confirm'] ?? '';
+
+        if (strlen($password) < 8) { Session::flash('error', 'Backup password must be at least 8 characters.'); header('Location: ' . APP_URL . '/admin/backups'); exit; }
+        if ($password !== $confirmPassword) { Session::flash('error', 'Passwords do not match.'); header('Location: ' . APP_URL . '/admin/backups'); exit; }
+
+        $options = [
+            'include_database' => true,
+            'include_files' => isset($_POST['include_files']),
+            'include_audit' => isset($_POST['include_audit'])
+        ];
+
+        try {
+            $result = BackupService::create($password, $options);
+
+            Database::insert(
+                "INSERT INTO backup_files (filename, file_path, file_size, sha256_checksum, backup_type, includes_database, includes_files, includes_audit_logs, created_by_user_id, created_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, NOW())",
+                [$result['filename'], $result['file_path'], $result['file_size'], $result['sha256_checksum'],
+                 $result['includes_files'] ? 'database_files' : 'database_only',
+                 $result['includes_files'] ? 1 : 0, $result['includes_audit_logs'] ? 1 : 0, Session::getUserId()]
+            );
+
+            AuditLog::log('backup_created', Session::getUserId(), null, null, ['file' => $result['filename'], 'size' => $result['file_size']]);
+            Session::flash('success', 'Backup created: ' . $result['filename'] . ' (' . number_format($result['file_size']/1048576, 1) . ' MB)');
+        } catch (\Exception $e) {
+            Session::flash('error', 'Backup failed: ' . $e->getMessage());
+        }
+
+        header('Location: ' . APP_URL . '/admin/backups');
+        exit;
+    }
+
+    private function backupsDownload(int $id): void {
+        $backup = Database::fetchOne("SELECT * FROM backup_files WHERE id = ?", [$id]);
+        if (!$backup) { http_response_code(404); echo 'Backup not found'; return; }
+
+        $basePath = realpath(__DIR__ . '/../../app_storage/backups');
+        $filePath = realpath(__DIR__ . '/../../' . $backup['file_path']);
+
+        if (!$basePath || !$filePath || strpos($filePath, $basePath) !== 0 || !file_exists($filePath)) {
+            http_response_code(404); echo 'Backup file not found'; return;
+        }
+
+        Database::execute("UPDATE backup_files SET downloaded_at = NOW() WHERE id = ?", [$id]);
+        AuditLog::log('backup_downloaded', Session::getUserId(), 'backup', $id);
+
+        header('Content-Type: application/octet-stream');
+        header('Content-Disposition: attachment; filename="' . preg_replace('/[^a-zA-Z0-9._\-]/', '_', $backup['filename']) . '"');
+        header('Content-Length: ' . filesize($filePath));
+        header('X-Content-Type-Options: nosniff');
+        header('Cache-Control: private, no-cache');
+
+        $handle = fopen($filePath, 'rb');
+        while (!feof($handle)) { echo fread($handle, 8192); flush(); }
+        fclose($handle);
+        exit;
+    }
+
+    private function backupsDelete(): void {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . APP_URL . '/admin/backups'); exit; }
+        CSRF::validateOrFail();
+
+        $id = (int)($_POST['id'] ?? 0);
+        $backup = Database::fetchOne("SELECT * FROM backup_files WHERE id = ?", [$id]);
+        if ($backup) {
+            $basePath = realpath(__DIR__ . '/../../app_storage/backups');
+            $filePath = realpath(__DIR__ . '/../../' . $backup['file_path']);
+            if ($basePath && $filePath && strpos($filePath, $basePath) === 0) { @unlink($filePath); }
+            Database::execute("DELETE FROM backup_files WHERE id = ?", [$id]);
+            AuditLog::log('backup_deleted', Session::getUserId(), 'backup', $id);
+            Session::flash('success', 'Backup deleted.');
+        }
+        header('Location: ' . APP_URL . '/admin/backups');
+        exit;
+    }
+
+    // ================================================================
+    // EMAIL SETTINGS
+    // Routes: /admin/email, /admin/email/save, /admin/email/test
+    // ================================================================
+
+    public function email(?string $subAction = null): void {
+        switch ($subAction) {
+            case 'save': $this->emailSave(); return;
+            case 'test': $this->emailTest(); return;
+        }
+
+        $settings = [];
+        $rows = Database::fetchAll("SELECT setting_key, setting_value FROM app_settings WHERE setting_key LIKE 'resend_%' OR setting_key LIKE '%email%'");
+        foreach ($rows as $r) $settings[$r['setting_key']] = $r['setting_value'];
+
+        $data = ['settings' => $settings, 'csrfToken' => CSRF::generateToken()];
+        require __DIR__ . '/../views/admin/email.php';
+    }
+
+    private function emailSave(): void {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . APP_URL . '/admin/email'); exit; }
+        CSRF::validateOrFail();
+
+        $apiKey = trim($_POST['resend_api_key'] ?? '');
+        $fromEmail = Security::sanitizeEmail($_POST['resend_from_email'] ?? '');
+        $fromName = Security::sanitize($_POST['resend_from_name'] ?? 'AMPass');
+
+        // Only update API key if a new one is provided (not masked)
+        if (!empty($apiKey) && !str_contains($apiKey, '****')) {
+            $encrypted = EmailService::encryptApiKey($apiKey);
+            Database::execute("INSERT INTO app_settings (setting_key, setting_value) VALUES ('resend_api_key_encrypted', ?) ON DUPLICATE KEY UPDATE setting_value = ?", [$encrypted, $encrypted]);
+        }
+
+        $emailSettings = [
+            'resend_from_email' => $fromEmail,
+            'resend_from_name' => $fromName,
+            'resend_reply_to' => Security::sanitizeEmail($_POST['resend_reply_to'] ?? ''),
+            'security_email_enabled' => isset($_POST['security_email_enabled']) ? '1' : '0',
+            'password_reset_email_enabled' => isset($_POST['password_reset_email_enabled']) ? '1' : '0',
+            'new_device_email_enabled' => isset($_POST['new_device_email_enabled']) ? '1' : '0',
+            'two_factor_email_enabled' => isset($_POST['two_factor_email_enabled']) ? '1' : '0',
+            'backup_restore_email_enabled' => isset($_POST['backup_restore_email_enabled']) ? '1' : '0'
+        ];
+
+        foreach ($emailSettings as $key => $value) {
+            Database::execute("INSERT INTO app_settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = ?", [$key, $value, $value]);
+        }
+
+        AuditLog::log('email_settings_updated', Session::getUserId());
+        Session::flash('success', 'Email settings saved.');
+        header('Location: ' . APP_URL . '/admin/email');
+        exit;
+    }
+
+    private function emailTest(): void {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . APP_URL . '/admin/email'); exit; }
+        CSRF::validateOrFail();
+
+        $user = User::findById(Session::getUserId());
+        $result = EmailService::send($user['email'], 'AMPass Test Email', '<h2>AMPass Email Test</h2><p>If you received this, your Resend email integration is working correctly.</p><p>Sent at: ' . date('c') . '</p>');
+
+        if ($result['success']) {
+            Session::flash('success', 'Test email sent to ' . $user['email']);
+        } else {
+            Session::flash('error', 'Test email failed: ' . ($result['error'] ?? 'Unknown error'));
+        }
+
+        header('Location: ' . APP_URL . '/admin/email');
         exit;
     }
 }

@@ -1,0 +1,4 @@
+# SECURITY: Block all direct access to backup files.
+# Backups are served through the admin controller only.
+Order deny,allow
+Deny from all
