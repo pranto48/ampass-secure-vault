@@ -15,6 +15,11 @@ class LoginController {
             exit;
         }
 
+        // Prevent browser caching of login page (stale CSRF tokens)
+        header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+        header('Pragma: no-cache');
+        header('Expires: 0');
+
         $error = Session::flash('error');
         $success = Session::flash('success');
         $csrfToken = CSRF::generateToken();
@@ -31,8 +36,8 @@ class LoginController {
             exit;
         }
 
-        // Validate CSRF
-        CSRF::validateOrFail();
+        // Validate CSRF — redirects to /login with friendly message on failure
+        CSRF::validateOrRedirect(APP_URL . '/login');
 
         $login = trim($_POST['login'] ?? '');
         $password = $_POST['password'] ?? '';

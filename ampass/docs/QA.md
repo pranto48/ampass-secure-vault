@@ -126,3 +126,32 @@
 - [ ] Bearer token Authorization header works on XAMPP Apache
 - [ ] Bearer token Authorization header works on cPanel
 - [ ] /api/extension/debug-auth returns diagnostics on localhost
+
+## CSRF Token Handling
+
+### Login Form CSRF
+- [ ] Open `/login`, wait, submit with valid token → login works normally
+- [ ] Open `/login` in two tabs, login from tab 1, submit old tab 2 → redirects to `/login` with "Security token expired" message (no raw JSON)
+- [ ] Browser back button to old login page → no raw JSON shown on submit
+- [ ] Manually POST invalid `csrf_token` to `/login/submit` → redirects to `/login` with friendly error
+- [ ] Login page sends `Cache-Control: no-store` header (check in DevTools)
+
+### Unlock Form CSRF
+- [ ] Open `/unlock`, wait, submit with valid token → unlock works
+- [ ] Submit stale CSRF on `/unlock` → redirects to `/unlock` with friendly message
+- [ ] Unlock page sends `Cache-Control: no-store` header
+
+### Register Form CSRF
+- [ ] Submit stale CSRF on `/register` → redirects to `/register` with friendly message
+- [ ] Register page sends `Cache-Control: no-store` header
+
+### API/AJAX CSRF
+- [ ] AJAX request with invalid CSRF to `/api/vault/save` → returns JSON `{"error": "...", "code": "CSRF_INVALID"}`
+- [ ] `/api/auth/csrfToken` returns fresh token
+- [ ] `/api/auth/status` returns current CSRF token
+
+### Extension Compatibility
+- [ ] Extension autofill does NOT fill hidden `csrf_token` fields
+- [ ] Extension autofill does NOT modify hidden inputs named `_token` or `_csrf`
+- [ ] Extension save-detector does NOT capture AMPass own login/unlock/register pages
+- [ ] Extension does NOT submit AMPass login form in a way that drops CSRF token

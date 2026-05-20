@@ -78,9 +78,15 @@
   }
 
   /**
-   * Fill a field and trigger proper events so websites detect the change
+   * Fill a field and trigger proper events so websites detect the change.
+   * SECURITY: Never fills hidden inputs, csrf_token fields, or AMPass-internal fields.
    */
   function fillField(field, value) {
+    // Never fill hidden fields or CSRF tokens
+    if (!field || field.type === 'hidden') return;
+    if (field.name === 'csrf_token' || field.name === '_token' || field.name === '_csrf') return;
+    if (field.getAttribute('data-ampass-no-fill') === 'true') return;
+
     // Focus the field
     field.focus();
 

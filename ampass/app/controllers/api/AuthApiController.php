@@ -24,6 +24,20 @@ class AuthApiController {
     }
 
     /**
+     * GET /api/auth/csrfToken - Get a fresh CSRF token
+     * For same-origin requests only (login/unlock pages that need a fresh token).
+     * SECURITY: Only returns token, no sensitive data. Same-origin enforced by CORS.
+     */
+    public function csrfToken(): void {
+        // Regenerate to ensure freshness
+        CSRF::regenerate();
+        echo json_encode([
+            'success' => true,
+            'csrf_token' => CSRF::getToken()
+        ]);
+    }
+
+    /**
      * GET /api/auth/derivation-params - Get key derivation parameters
      * SECURITY: Only returns params after authentication. These are needed
      * by the client to derive the encryption key from the master password.

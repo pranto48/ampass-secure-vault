@@ -18,6 +18,11 @@ class RegisterController {
             exit;
         }
 
+        // Prevent browser caching of register page (stale CSRF tokens)
+        header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+        header('Pragma: no-cache');
+        header('Expires: 0');
+
         $error = Session::flash('error');
         $csrfToken = CSRF::generateToken();
         require __DIR__ . '/../views/auth/register.php';
@@ -29,7 +34,8 @@ class RegisterController {
             exit;
         }
 
-        CSRF::validateOrFail();
+        // Validate CSRF — redirects to /register with friendly message on failure
+        CSRF::validateOrRedirect(APP_URL . '/register');
 
         if (!defined('REGISTRATION_ENABLED') || !REGISTRATION_ENABLED) {
             Session::flash('error', 'Registration is currently disabled.');

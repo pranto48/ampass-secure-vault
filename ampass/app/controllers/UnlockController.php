@@ -21,6 +21,11 @@ class UnlockController {
             exit;
         }
 
+        // Prevent browser caching of unlock page (stale CSRF tokens)
+        header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+        header('Pragma: no-cache');
+        header('Expires: 0');
+
         $error = Session::flash('error');
         $csrfToken = CSRF::generateToken();
         $userId = Session::getUserId();
@@ -37,7 +42,8 @@ class UnlockController {
             exit;
         }
 
-        CSRF::validateOrFail();
+        // Validate CSRF — redirects to /unlock with friendly message on failure
+        CSRF::validateOrRedirect(APP_URL . '/unlock');
 
         $masterPassword = $_POST['master_password'] ?? '';
         $userId = Session::getUserId();

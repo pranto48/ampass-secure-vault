@@ -41,13 +41,76 @@ class CSRF {
     }
 
     /**
-     * Validate and throw exception if invalid
+     * Validate and die with JSON if invalid.
+     * Use ONLY for API/AJAX endpoints that always expect JSON responses.
      */
     public static function validateOrFail(?string $token = null): void {
         if (!self::validate($token)) {
+            self::regenerate();
             http_response_code(403);
-            die(json_encode(['error' => 'Invalid security token. Please refresh and try again.']));
+            if (self::isAjaxRequest()) {
+                die(json_encode(['error' => 'Invalid security token. Please refresh and try again.', 'code' => 'CSRF_INVALID']));
+            }
+            die(json_encode(['error' => 'Invalid security token. Please refresh and try again.', 'code' => 'CSRF_INVALID']));
         }
+    }
+
+    /**
+     * Validate CSRF token for HTML form submissions.
+     * On failure: regenerates token, flashes error, redirects back.
+     * On success: returns normally.
+     * 
+     * Use this for all normal HTML form POST handlers (login, register, unlock, admin forms).
+     * Never shows raw JSON to the user.
+     */
+    public static function validateOrRedirect(string $redirectUrl, string $message = 'Security token expired. Please try again.'): void {
+        if (self::validate()) {
+            return; // Valid — continue
+        }
+
+        // Token invalid — regenerate for next attempt
+        self::regenerate();
+
+        // If this is an AJAX/API request, return JSON
+        if (self::isAjaxRequest()) {
+            http_response_code(403);
+            header('Content-Type: application/json');
+            die(json_encode(['error' => $message, 'code' => 'CSRF_INVALID']));
+        }
+
+        // Normal HTML form — redirect with flash message
+        Session::flash('error', $message);
+        header('Location: ' . $redirectUrl);
+        exit;
+    }
+
+    /**
+     * Detect if the current request is AJAX/API (expects JSON response).
+     */
+    public static function isAjaxRequest(): bool {
+        // XMLHttpRequest header (jQuery, fetch with custom header, etc.)
+        if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
+            return true;
+        }
+
+        // Accept header prefers JSON
+        $accept = $_SERVER['HTTP_ACCEPT'] ?? '';
+        if (str_contains($accept, 'application/json') && !str_contains($accept, 'text/html')) {
+            return true;
+        }
+
+        // Route starts with /api
+        $route = trim($_GET['route'] ?? '', '/');
+        if (str_starts_with($route, 'api/')) {
+            return true;
+        }
+
+        // X-CSRF-TOKEN header present (typically sent by JS, not HTML forms)
+        if (!empty($_SERVER['HTTP_X_CSRF_TOKEN'])) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
