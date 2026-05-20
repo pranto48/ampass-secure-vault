@@ -69,7 +69,7 @@ dependencies = [
 
 [[package]]
 name = "ampass-desktop"
-version = "1.0.0"
+version = "1.63.0"
 dependencies = [
  "aes-gcm",
  "chrono",

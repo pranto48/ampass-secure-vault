@@ -635,7 +635,15 @@ class UpdateService {
     // ================================================================
 
     public static function getInstalledVersion(): string {
-        return defined('APP_VERSION') ? APP_VERSION : (self::getSetting('installed_version', '1.0.0'));
+        return defined('AMPASS_VERSION_SEMVER') ? AMPASS_VERSION_SEMVER : (defined('APP_VERSION') ? APP_VERSION : self::getSetting('installed_version', '1.0.0'));
+    }
+
+    public static function getInstalledVersionDisplay(): string {
+        return defined('AMPASS_VERSION_DISPLAY') ? AMPASS_VERSION_DISPLAY : ('v' . self::getInstalledVersion());
+    }
+
+    public static function getInstalledCommitCount(): int {
+        return defined('AMPASS_COMMIT_COUNT') ? AMPASS_COMMIT_COUNT : 0;
     }
 
     public static function getUpdateHistory(int $limit = 10): array {

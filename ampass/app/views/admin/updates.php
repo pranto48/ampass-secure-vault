@@ -20,8 +20,8 @@ $sourceLabel = $sourceType === 'github_branch_zip' ? 'Branch ZIP' : 'GitHub Rele
         <div class="card-header"><h2 class="card-title">Version Status</h2><span class="badge"><?= htmlspecialchars($sourceLabel) ?></span></div>
         <div class="card-body">
             <div class="info-grid">
-                <div class="info-item"><span>Installed Version:</span><strong>v<?= htmlspecialchars($data['current_version']) ?></strong></div>
-                <div class="info-item"><span>Installed Commit:</span><strong><code><?= htmlspecialchars(substr($data['installed_sha'], 0, 8) ?: 'not set') ?></code></strong></div>
+                <div class="info-item"><span>Installed Version:</span><strong><?= htmlspecialchars(defined('AMPASS_VERSION_DISPLAY') ? AMPASS_VERSION_DISPLAY : 'v' . $data['current_version']) ?></strong></div>
+                <div class="info-item"><span>Installed Commit:</span><strong><code><?= htmlspecialchars(substr($data['installed_sha'], 0, 8) ?: 'not set') ?></code><?php if (defined('AMPASS_COMMIT_COUNT') && AMPASS_COMMIT_COUNT > 0): ?> <span class="text-muted">(#<?= AMPASS_COMMIT_COUNT ?>)</span><?php endif; ?></strong></div>
                 <div class="info-item"><span>Source:</span><strong><?= htmlspecialchars($sourceLabel) ?> (<?= htmlspecialchars($data['github_repo_owner'] . '/' . $data['github_repo_name']) ?>)</strong></div>
                 <?php if ($sourceType === 'github_branch_zip'): ?>
                 <div class="info-item"><span>Branch:</span><strong><?= htmlspecialchars($data['github_branch']) ?></strong></div>
@@ -108,6 +108,7 @@ $sourceLabel = $sourceType === 'github_branch_zip' ? 'Branch ZIP' : 'GitHub Rele
                     <small class="text-muted">Token is encrypted at rest. Never logged.</small>
                 </div>
                 <button type="submit" class="btn btn-primary">Save Settings</button>
+                <p class="text-muted" style="margin-top:12px;font-size:0.75rem;">To sync version numbers across all files (web, desktop, extension), run from CLI:<br><code>php scripts/sync-version.php</code></p>
             </form>
         </div>
     </div>

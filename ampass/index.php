@@ -16,6 +16,7 @@ if (!file_exists(__DIR__ . '/config/config.php')) {
 }
 
 require_once __DIR__ . '/config/config.php';
+require_once __DIR__ . '/app/version.php';
 require_once __DIR__ . '/app/core/App.php';
 require_once __DIR__ . '/app/core/Database.php';
 require_once __DIR__ . '/app/core/Session.php';

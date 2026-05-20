@@ -102,6 +102,14 @@
       showStatus('⚠️ Server is not using HTTPS. Your data may be at risk.', 'warning');
     }
 
+    // Show version in footer
+    const manifest = chrome.runtime.getManifest();
+    const versionEl = document.getElementById('versionFooter');
+    if (versionEl) {
+      versionEl.textContent = 'AMPass ' + (manifest.version_name || 'v' + manifest.version);
+      versionEl.style.cssText = 'text-align:center;font-size:10px;color:#64748b;padding:4px 0 2px;';
+    }
+
     // Check native bridge connection
     checkBridgeStatus();
   }
