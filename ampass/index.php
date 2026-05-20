@@ -29,6 +29,28 @@ Security::setHeaders();
 // Start secure session
 Session::start();
 
+// Check maintenance mode (allow admin access to /admin/updates and /admin/backups)
+$route = trim($_GET['route'] ?? '', '/');
+$isAdminRoute = str_starts_with($route, 'admin/updates') || str_starts_with($route, 'admin/backups');
+$isApiRoute = str_starts_with($route, 'api/');
+
+try {
+    $maintenance = Database::fetchOne("SELECT setting_value FROM app_settings WHERE setting_key = 'maintenance_mode'");
+    if ($maintenance && $maintenance['setting_value'] === '1' && !$isAdminRoute) {
+        if ($isApiRoute) {
+            header('Content-Type: application/json');
+            http_response_code(503);
+            echo json_encode(['error' => 'AMPass server is updating. Try again later.', 'code' => 'MAINTENANCE']);
+            exit;
+        }
+        if (!Session::isAdmin()) {
+            http_response_code(503);
+            require __DIR__ . '/app/views/errors/maintenance.php';
+            exit;
+        }
+    }
+} catch (\Exception $e) { /* DB may not be ready */ }
+
 // Route the request
 $app = new App();
 $app->run();
