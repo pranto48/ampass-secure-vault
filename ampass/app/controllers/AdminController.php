@@ -481,6 +481,7 @@ class AdminController {
         switch ($subAction) {
             case 'create': $this->backupsCreate(); return;
             case 'delete': $this->backupsDelete(); return;
+            case 'download-latest': $this->backupsDownloadLatest(); return;
         }
 
         // Handle download with ID in query
@@ -492,6 +493,19 @@ class AdminController {
         $backups = Database::fetchAll("SELECT * FROM backup_files ORDER BY created_at DESC");
         $data = ['backups' => $backups, 'csrfToken' => CSRF::generateToken()];
         require __DIR__ . '/../views/admin/backups.php';
+    }
+
+    private function backupsDownloadLatest(): void {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . APP_URL . '/admin/backups'); exit; }
+        CSRF::validateOrRedirect(APP_URL . '/admin/backups');
+
+        $latest = Database::fetchOne("SELECT id FROM backup_files ORDER BY created_at DESC LIMIT 1");
+        if (!$latest) {
+            Session::flash('error', 'No backups available to download.');
+            header('Location: ' . APP_URL . '/admin/backups');
+            exit;
+        }
+        $this->backupsDownload((int)$latest['id']);
     }
 
     private function backupsCreate(): void {
@@ -813,6 +827,8 @@ class AdminController {
     public function backupDestinations(?string $subAction = null): void {
         switch ($subAction) {
             case 'save': $this->backupDestinationsSave(); return;
+            case 'edit': $this->backupDestinationsEdit(); return;
+            case 'update': $this->backupDestinationsUpdate(); return;
             case 'test': $this->backupDestinationsTest(); return;
             case 'delete': $this->backupDestinationsDelete(); return;
             case 'upload': $this->backupDestinationsUpload(); return;
@@ -822,8 +838,90 @@ class AdminController {
 
         $destinations = Database::fetchAll("SELECT * FROM remote_backup_destinations ORDER BY created_at DESC");
         $backups = Database::fetchAll("SELECT id, filename, created_at FROM backup_files ORDER BY created_at DESC LIMIT 10");
-        $data = ['destinations' => $destinations, 'backups' => $backups, 'csrfToken' => CSRF::generateToken()];
+
+        // Decode destination status for OneDrive
+        foreach ($destinations as &$dest) {
+            $dest['_status'] = 'enabled';
+            if ($dest['provider'] === 'onedrive') {
+                $config = RemoteBackupService::decryptConfigPublic($dest['encrypted_config']);
+                if (!$config || empty($config['client_id'])) {
+                    $dest['_status'] = 'not_configured';
+                } elseif (empty($config['refresh_token'])) {
+                    $dest['_status'] = 'ready_to_connect';
+                } else {
+                    $dest['_status'] = 'connected';
+                }
+            }
+            if (!empty($dest['last_error'])) {
+                $dest['_has_error'] = true;
+            }
+        }
+        unset($dest);
+
+        $preselectedBackup = isset($_GET['backup_id']) ? (int)$_GET['backup_id'] : null;
+        $data = ['destinations' => $destinations, 'backups' => $backups, 'csrfToken' => CSRF::generateToken(), 'preselected_backup' => $preselectedBackup];
         require __DIR__ . '/../views/admin/backup-destinations.php';
+    }
+
+    private function backupDestinationsEdit(): void {
+        $id = (int)($_GET['id'] ?? 0);
+        if (!$id) { header('Location: ' . APP_URL . '/admin/backup-destinations'); exit; }
+
+        $dest = Database::fetchOne("SELECT * FROM remote_backup_destinations WHERE id = ?", [$id]);
+        if (!$dest) { Session::flash('error', 'Destination not found.'); header('Location: ' . APP_URL . '/admin/backup-destinations'); exit; }
+
+        $config = RemoteBackupService::decryptConfigPublic($dest['encrypted_config']) ?: [];
+        // Never expose secrets to view — mask them
+        $maskedConfig = $config;
+        if (!empty($maskedConfig['password'])) $maskedConfig['password'] = '';
+        if (!empty($maskedConfig['client_secret'])) $maskedConfig['client_secret'] = '';
+        $maskedConfig['_has_password'] = !empty($config['password']);
+        $maskedConfig['_has_client_secret'] = !empty($config['client_secret']);
+        $maskedConfig['_has_refresh_token'] = !empty($config['refresh_token']);
+
+        $data = ['dest' => $dest, 'config' => $maskedConfig, 'csrfToken' => CSRF::generateToken()];
+        require __DIR__ . '/../views/admin/backup-destination-edit.php';
+    }
+
+    private function backupDestinationsUpdate(): void {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . APP_URL . '/admin/backup-destinations'); exit; }
+        CSRF::validateOrRedirect(APP_URL . '/admin/backup-destinations');
+
+        $id = (int)($_POST['id'] ?? 0);
+        if (!$id) { header('Location: ' . APP_URL . '/admin/backup-destinations'); exit; }
+
+        $dest = Database::fetchOne("SELECT * FROM remote_backup_destinations WHERE id = ?", [$id]);
+        if (!$dest) { Session::flash('error', 'Destination not found.'); header('Location: ' . APP_URL . '/admin/backup-destinations'); exit; }
+
+        // Load existing config to preserve secrets not re-entered
+        $existingConfig = RemoteBackupService::decryptConfigPublic($dest['encrypted_config']) ?: [];
+
+        $name = Security::sanitize($_POST['name'] ?? $dest['name']);
+        $enabled = isset($_POST['enabled']) ? 1 : 0;
+
+        $config = $existingConfig; // Start with existing
+        $config['host'] = trim($_POST['host'] ?? $config['host'] ?? '');
+        $config['port'] = (int)($_POST['port'] ?? $config['port'] ?? 21);
+        $config['username'] = trim($_POST['username'] ?? $config['username'] ?? '');
+        $config['remote_directory'] = trim($_POST['remote_directory'] ?? $config['remote_directory'] ?? '/ampass-backups');
+        $config['passive_mode'] = isset($_POST['passive_mode']);
+        $config['folder_path'] = trim($_POST['folder_path'] ?? $config['folder_path'] ?? 'AMPass Backups');
+        $config['client_id'] = trim($_POST['client_id'] ?? $config['client_id'] ?? '');
+
+        // Only update password/secret if new value provided
+        $newPassword = $_POST['password'] ?? '';
+        if (!empty($newPassword)) $config['password'] = $newPassword;
+
+        $newSecret = $_POST['client_secret'] ?? '';
+        if (!empty($newSecret)) $config['client_secret'] = $newSecret;
+
+        $encryptedConfig = RemoteBackupService::encryptConfig($config);
+        Database::execute("UPDATE remote_backup_destinations SET name = ?, enabled = ?, encrypted_config = ? WHERE id = ?", [$name, $enabled, $encryptedConfig, $id]);
+
+        AuditLog::log('remote_backup_destination_updated', Session::getUserId(), 'destination', $id);
+        Session::flash('success', "Destination '{$name}' updated.");
+        header('Location: ' . APP_URL . '/admin/backup-destinations');
+        exit;
     }
 
     private function backupDestinationsSave(): void {
@@ -926,7 +1024,7 @@ class AdminController {
 
         $config = RemoteBackupService::decryptConfigPublic($dest['encrypted_config']);
         if (!$config || empty($config['client_id'])) {
-            Session::flash('error', 'OneDrive destination missing client_id. Edit the destination first.');
+            Session::flash('error', 'OneDrive is not configured yet. Please open Edit and enter your Microsoft Azure Client ID and Client Secret first.');
             header('Location: ' . APP_URL . '/admin/backup-destinations');
             exit;
         }
