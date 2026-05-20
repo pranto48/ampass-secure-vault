@@ -38,6 +38,7 @@ class Session {
                 self::destroy();
                 session_start();
                 $_SESSION['_fingerprint'] = $fingerprint;
+                $_SESSION['last_activity'] = time();
                 return;
             }
         } else {
@@ -49,7 +50,9 @@ class Session {
             $timeout = defined('SESSION_LIFETIME') ? SESSION_LIFETIME : 3600;
             if (time() - $_SESSION['last_activity'] > $timeout) {
                 self::destroy();
-                return;
+                // Restart a fresh session so CSRF tokens and flash messages work
+                session_start();
+                $_SESSION['_fingerprint'] = self::generateFingerprint();
             }
         }
         $_SESSION['last_activity'] = time();
@@ -65,13 +68,14 @@ class Session {
     }
 
     /**
-     * Generate a session fingerprint based on client characteristics
-     * SECURITY: Helps detect session hijacking by binding session to user-agent
+     * Generate a session fingerprint based on client characteristics.
+     * SECURITY: Helps detect session hijacking by binding session to user-agent.
+     * Uses only User-Agent (not Accept header) because Accept can differ between
+     * GET page loads and POST form submissions, causing false fingerprint mismatches.
      */
     private static function generateFingerprint(): string {
         $ua = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
-        $accept = $_SERVER['HTTP_ACCEPT'] ?? '';
-        return hash('sha256', $ua . '|' . $accept);
+        return hash('sha256', $ua);
     }
 
     /**
