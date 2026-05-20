@@ -123,9 +123,9 @@ class UpdateService {
             $downloaded = self::downloadFile($downloadUrl, $zipPath);
             if (!$downloaded) throw new \Exception('Failed to download update package from GitHub');
 
-            // Step 4: Extract ZIP
+            // Step 4: Safe ZIP extraction (validates all entries BEFORE extracting)
             self::ensureDir($stagingDir);
-            $extracted = self::extractZip($zipPath, $stagingDir);
+            $extracted = self::safeExtractZip($zipPath, $stagingDir);
             if (!$extracted) throw new \Exception('Failed to extract update package');
 
             // Step 5: Find project root inside extracted ZIP
@@ -137,13 +137,13 @@ class UpdateService {
 
             // Step 7: Copy files with rollback support
             self::ensureDir($rollbackDir);
-            $copiedFiles = self::copyUpdateFiles($sourceRoot, $appRoot, $rollbackDir);
+            $copyResult = self::copyUpdateFiles($sourceRoot, $appRoot, $rollbackDir);
 
             // Step 8: Run migrations
             $migrationResult = self::runPendingMigrations();
             if ($migrationResult['failed']) {
-                // Migration failed — rollback files
-                self::restoreRollback($rollbackDir, $appRoot);
+                // Migration failed — full rollback including newly-created files
+                self::restoreRollback($rollbackDir, $appRoot, $copyResult['created'], $copyResult['created_dirs']);
                 throw new \Exception('Migration failed: ' . $migrationResult['failed'] . '. Files rolled back.');
             }
 
@@ -157,17 +157,22 @@ class UpdateService {
             self::saveSetting('maintenance_mode', '0');
 
             // Step 11: Record success
+            $totalFiles = count($copyResult['copied']);
             Database::execute("UPDATE update_history SET status = 'completed', completed_at = NOW(), notes = ? WHERE id = ?",
-                ['Updated ' . count($copiedFiles) . ' files. Migrations: ' . count($migrationResult['applied']) . ' applied.', $updateId]);
+                ['Updated ' . $totalFiles . ' files (' . count($copyResult['overwritten']) . ' overwritten, ' . count($copyResult['created']) . ' new). Migrations: ' . count($migrationResult['applied']) . ' applied.', $updateId]);
 
             // Cleanup temp
             self::deleteDir($tempBase);
 
-            return ['success' => true, 'version' => $latestVersion, 'files_updated' => count($copiedFiles), 'migrations_applied' => $migrationResult['applied']];
+            return ['success' => true, 'version' => $latestVersion, 'files_updated' => $totalFiles, 'migrations_applied' => $migrationResult['applied']];
 
         } catch (\Exception $e) {
             self::saveSetting('maintenance_mode', '0');
             Database::execute("UPDATE update_history SET status = 'failed', error_message = ?, completed_at = NOW() WHERE id = ?", [substr($e->getMessage(), 0, 1000), $updateId]);
+            // Attempt rollback if copyResult is available
+            if (isset($copyResult)) {
+                self::restoreRollback($rollbackDir, $appRoot, $copyResult['created'] ?? [], $copyResult['created_dirs'] ?? []);
+            }
             self::deleteDir($tempBase);
             return ['success' => false, 'error' => $e->getMessage()];
         }
@@ -177,11 +182,119 @@ class UpdateService {
     // FILE EXTRACTION & VALIDATION
     // ================================================================
 
-    private static function extractZip(string $zipPath, string $destDir): bool {
+    /**
+     * Safe ZIP extraction — validates EVERY entry BEFORE extraction.
+     * Rejects: path traversal, absolute paths, null bytes, drive letters, symlinks, empty names.
+     * Never calls extractTo() on untrusted ZIP.
+     */
+    private static function safeExtractZip(string $zipPath, string $destDir): bool {
         if (!class_exists('ZipArchive')) return false;
         $zip = new \ZipArchive();
         if ($zip->open($zipPath) !== true) return false;
-        $zip->extractTo($destDir);
+
+        $destDir = rtrim(str_replace('\\', '/', $destDir), '/');
+        $realDest = realpath($destDir);
+        if (!$realDest) { $zip->close(); return false; }
+        $realDest = str_replace('\\', '/', $realDest);
+
+        // PASS 1: Validate ALL entries before extracting anything
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            $stat = $zip->statIndex($i);
+            if ($stat === false) { $zip->close(); return false; }
+
+            $entryName = $stat['name'];
+
+            // Reject empty names
+            if (empty($entryName)) {
+                $zip->close();
+                throw new \Exception("ZIP entry #{$i} has empty name");
+            }
+
+            // Reject null bytes
+            if (str_contains($entryName, "\0")) {
+                $zip->close();
+                throw new \Exception("ZIP entry contains null byte: " . bin2hex($entryName));
+            }
+
+            // Normalize slashes
+            $normalized = str_replace('\\', '/', $entryName);
+
+            // Reject path traversal
+            if (str_contains($normalized, '../') || str_contains($normalized, '/..')) {
+                $zip->close();
+                throw new \Exception("ZIP path traversal rejected: {$entryName}");
+            }
+
+            // Reject absolute paths
+            if (str_starts_with($normalized, '/') || str_starts_with($normalized, '\\')) {
+                $zip->close();
+                throw new \Exception("ZIP absolute path rejected: {$entryName}");
+            }
+
+            // Reject drive letters (C:, D:, etc.)
+            if (preg_match('/^[a-zA-Z]:/', $normalized)) {
+                $zip->close();
+                throw new \Exception("ZIP drive letter path rejected: {$entryName}");
+            }
+
+            // Reject symlinks (check external attributes for Unix symlink flag)
+            $externalAttr = $stat['external_attributes'] ?? 0;
+            // Unix symlink: (attr >> 16) & 0xF000 === 0xA000
+            if (($externalAttr >> 16 & 0xF000) === 0xA000) {
+                $zip->close();
+                throw new \Exception("ZIP symlink entry rejected: {$entryName}");
+            }
+        }
+
+        // PASS 2: Extract each file manually
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            $stat = $zip->statIndex($i);
+            $entryName = str_replace('\\', '/', $stat['name']);
+
+            $targetPath = $destDir . '/' . $entryName;
+
+            // Directory entry (ends with /)
+            if (str_ends_with($entryName, '/')) {
+                if (!is_dir($targetPath)) {
+                    mkdir($targetPath, 0755, true);
+                }
+                continue;
+            }
+
+            // Ensure parent directory exists
+            $parentDir = dirname($targetPath);
+            if (!is_dir($parentDir)) {
+                mkdir($parentDir, 0755, true);
+            }
+
+            // Final safety check: resolved path must be inside destination
+            $realParent = realpath($parentDir);
+            if (!$realParent || !str_starts_with(str_replace('\\', '/', $realParent), $realDest)) {
+                $zip->close();
+                throw new \Exception("ZIP extraction path escape detected: {$entryName}");
+            }
+
+            // Extract file content via stream
+            $stream = $zip->getStream($stat['name']);
+            if (!$stream) {
+                $zip->close();
+                throw new \Exception("Cannot read ZIP entry: {$entryName}");
+            }
+
+            $outFile = fopen($targetPath, 'wb');
+            if (!$outFile) {
+                fclose($stream);
+                $zip->close();
+                throw new \Exception("Cannot write file: {$targetPath}");
+            }
+
+            while (!feof($stream)) {
+                fwrite($outFile, fread($stream, 8192));
+            }
+            fclose($stream);
+            fclose($outFile);
+        }
+
         $zip->close();
         return true;
     }
@@ -232,10 +345,16 @@ class UpdateService {
     }
 
     /**
-     * Copy update files to app root, creating rollback copies
+     * Copy update files to app root, creating rollback copies.
+     * Returns structured result tracking overwritten, created files, and created directories.
      */
     private static function copyUpdateFiles(string $sourceRoot, string $appRoot, string $rollbackDir): array {
-        $copied = [];
+        $result = [
+            'copied' => [],
+            'overwritten' => [],
+            'created' => [],
+            'created_dirs' => []
+        ];
         $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($sourceRoot, \RecursiveDirectoryIterator::SKIP_DOTS));
 
         foreach ($iterator as $file) {
@@ -253,22 +372,48 @@ class UpdateService {
             $destPath = $appRoot . '/' . $relative;
             $rollbackPath = $rollbackDir . '/' . $relative;
 
-            // Backup existing file for rollback
-            if (file_exists($destPath)) {
+            // Track whether destination exists (overwrite vs create)
+            $isOverwrite = file_exists($destPath);
+
+            if ($isOverwrite) {
+                // Backup existing file for rollback
                 $rollbackParent = dirname($rollbackPath);
                 if (!is_dir($rollbackParent)) mkdir($rollbackParent, 0755, true);
                 copy($destPath, $rollbackPath);
+                $result['overwritten'][] = $relative;
+            } else {
+                // Track as newly created
+                $result['created'][] = $relative;
+            }
+
+            // Ensure destination directory exists, track new directories
+            $destParent = dirname($destPath);
+            if (!is_dir($destParent)) {
+                // Track all new directories created (for rollback cleanup)
+                $dirsToCreate = [];
+                $checkDir = $destParent;
+                while (!is_dir($checkDir) && $checkDir !== $appRoot) {
+                    $dirsToCreate[] = str_replace('\\', '/', str_replace($appRoot . DIRECTORY_SEPARATOR, '', $checkDir));
+                    $dirsToCreate[] = str_replace('\\', '/', str_replace($appRoot . '/', '', $checkDir));
+                    $checkDir = dirname($checkDir);
+                }
+                // Deduplicate and record
+                $dirsToCreate = array_unique($dirsToCreate);
+                foreach ($dirsToCreate as $d) {
+                    if (!in_array($d, $result['created_dirs'])) {
+                        $result['created_dirs'][] = $d;
+                    }
+                }
+                mkdir($destParent, 0755, true);
             }
 
             // Copy new file
-            $destParent = dirname($destPath);
-            if (!is_dir($destParent)) mkdir($destParent, 0755, true);
             if (copy($file->getPathname(), $destPath)) {
-                $copied[] = $relative;
+                $result['copied'][] = $relative;
             }
         }
 
-        return $copied;
+        return $result;
     }
 
     private static function shouldSkipPath(string $relative): bool {
@@ -286,17 +431,67 @@ class UpdateService {
     }
 
     /**
-     * Restore files from rollback directory
+     * Full rollback: restore overwritten files AND delete newly-created files/dirs.
+     * @param string $rollbackDir Directory containing backed-up originals
+     * @param string $appRoot Application root directory
+     * @param array $createdFiles Files that were newly created (not overwrites)
+     * @param array $createdDirs Directories that were newly created
      */
-    private static function restoreRollback(string $rollbackDir, string $appRoot): void {
-        if (!is_dir($rollbackDir)) return;
-        $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($rollbackDir, \RecursiveDirectoryIterator::SKIP_DOTS));
-        foreach ($iterator as $file) {
-            if ($file->isDir()) continue;
-            $relative = str_replace($rollbackDir . DIRECTORY_SEPARATOR, '', $file->getPathname());
-            $relative = str_replace('\\', '/', $relative);
-            $destPath = $appRoot . '/' . $relative;
-            @copy($file->getPathname(), $destPath);
+    private static function restoreRollback(string $rollbackDir, string $appRoot, array $createdFiles = [], array $createdDirs = []): void {
+        $realAppRoot = realpath($appRoot);
+        if (!$realAppRoot) return;
+        $realAppRoot = str_replace('\\', '/', $realAppRoot);
+
+        $rollbackLog = [];
+
+        // 1. Restore overwritten files from rollback directory
+        if (is_dir($rollbackDir)) {
+            $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($rollbackDir, \RecursiveDirectoryIterator::SKIP_DOTS));
+            foreach ($iterator as $file) {
+                if ($file->isDir()) continue;
+                $relative = str_replace($rollbackDir . DIRECTORY_SEPARATOR, '', $file->getPathname());
+                $relative = str_replace('\\', '/', $relative);
+                $destPath = $appRoot . '/' . $relative;
+                if (@copy($file->getPathname(), $destPath)) {
+                    $rollbackLog[] = "Restored: {$relative}";
+                }
+            }
+        }
+
+        // 2. Delete newly-created files (these didn't exist before the update)
+        foreach ($createdFiles as $relative) {
+            $filePath = $appRoot . '/' . $relative;
+            $realFile = realpath($filePath);
+            // Safety: only delete if inside app root
+            if ($realFile && str_starts_with(str_replace('\\', '/', $realFile), $realAppRoot) && file_exists($filePath)) {
+                @unlink($filePath);
+                $rollbackLog[] = "Deleted new file: {$relative}";
+            }
+        }
+
+        // 3. Remove empty directories created during update (deepest first)
+        // Sort by depth descending so we remove deepest dirs first
+        usort($createdDirs, function($a, $b) {
+            return substr_count($b, '/') - substr_count($a, '/');
+        });
+
+        foreach ($createdDirs as $relative) {
+            $dirPath = $appRoot . '/' . $relative;
+            $realDir = realpath($dirPath);
+            // Safety: only remove if inside app root and empty
+            if ($realDir && str_starts_with(str_replace('\\', '/', $realDir), $realAppRoot) && is_dir($dirPath)) {
+                // Only remove if directory is empty
+                $contents = @scandir($dirPath);
+                if ($contents !== false && count($contents) <= 2) { // . and ..
+                    @rmdir($dirPath);
+                    $rollbackLog[] = "Removed empty dir: {$relative}";
+                }
+            }
+        }
+
+        // Log rollback summary
+        if (!empty($rollbackLog)) {
+            error_log("AMPass rollback summary: " . count($rollbackLog) . " operations — " . implode('; ', array_slice($rollbackLog, 0, 10)));
         }
     }
 

@@ -29,11 +29,24 @@ class AdminController {
         $users = User::getAll(20, 0);
         $recentLogs = AuditLog::getAll(20);
 
+        // Fetch status info for dashboard cards
+        $updateAvailable = UpdateService::getSetting('update_available', '0') === '1';
+        $latestVersion = UpdateService::getSetting('latest_version', '');
+        $lastBackup = Database::fetchOne("SELECT created_at FROM backup_files ORDER BY created_at DESC LIMIT 1");
+        $lastRemoteBackup = Database::fetchOne("SELECT status, uploaded_at FROM remote_backup_uploads ORDER BY created_at DESC LIMIT 1");
+        $emailConfigured = !empty(Database::fetchOne("SELECT setting_value FROM app_settings WHERE setting_key = 'resend_api_key_encrypted' AND setting_value != ''"));
+
         $data = [
             'totalUsers' => $totalUsers,
             'users' => $users,
             'recentLogs' => $recentLogs,
-            'csrfToken' => CSRF::generateToken()
+            'csrfToken' => CSRF::generateToken(),
+            'updateAvailable' => $updateAvailable,
+            'latestVersion' => $latestVersion,
+            'lastBackupDate' => $lastBackup['created_at'] ?? null,
+            'lastRemoteBackupStatus' => $lastRemoteBackup['status'] ?? null,
+            'lastRemoteBackupDate' => $lastRemoteBackup['uploaded_at'] ?? null,
+            'emailConfigured' => $emailConfigured
         ];
 
         require __DIR__ . '/../views/admin/index.php';
@@ -716,6 +729,8 @@ class AdminController {
             case 'test': $this->backupDestinationsTest(); return;
             case 'delete': $this->backupDestinationsDelete(); return;
             case 'upload': $this->backupDestinationsUpload(); return;
+            case 'onedrive-connect': $this->onedriveConnect(); return;
+            case 'onedrive-callback': $this->onedriveCallback(); return;
         }
 
         $destinations = Database::fetchAll("SELECT * FROM remote_backup_destinations ORDER BY created_at DESC");
@@ -725,12 +740,12 @@ class AdminController {
     }
 
     private function backupDestinationsSave(): void {
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . APP_URL . '/admin/backupDestinations'); exit; }
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . APP_URL . '/admin/backup-destinations'); exit; }
         CSRF::validateOrFail();
 
         $name = Security::sanitize($_POST['name'] ?? '');
         $provider = $_POST['provider'] ?? '';
-        if (!in_array($provider, ['ftp', 'ftps', 'sftp', 'onedrive'], true)) { Session::flash('error', 'Invalid provider.'); header('Location: ' . APP_URL . '/admin/backupDestinations'); exit; }
+        if (!in_array($provider, ['ftp', 'ftps', 'sftp', 'onedrive'], true)) { Session::flash('error', 'Invalid provider.'); header('Location: ' . APP_URL . '/admin/backup-destinations'); exit; }
 
         $config = [
             'host' => trim($_POST['host'] ?? ''),
@@ -755,16 +770,16 @@ class AdminController {
 
         AuditLog::log('remote_backup_destination_created', Session::getUserId(), null, null, ['name' => $name, 'provider' => $provider]);
         Session::flash('success', "Destination '{$name}' ({$provider}) added.");
-        header('Location: ' . APP_URL . '/admin/backupDestinations');
+        header('Location: ' . APP_URL . '/admin/backup-destinations');
         exit;
     }
 
     private function backupDestinationsTest(): void {
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . APP_URL . '/admin/backupDestinations'); exit; }
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . APP_URL . '/admin/backup-destinations'); exit; }
         CSRF::validateOrFail();
         $id = (int)($_POST['id'] ?? 0);
         $dest = Database::fetchOne("SELECT * FROM remote_backup_destinations WHERE id = ?", [$id]);
-        if (!$dest) { Session::flash('error', 'Destination not found.'); header('Location: ' . APP_URL . '/admin/backupDestinations'); exit; }
+        if (!$dest) { Session::flash('error', 'Destination not found.'); header('Location: ' . APP_URL . '/admin/backup-destinations'); exit; }
 
         $config = RemoteBackupService::decryptConfigPublic($dest['encrypted_config']);
         $result = RemoteBackupService::testConnection($config ?: [], $dest['provider']);
@@ -772,12 +787,12 @@ class AdminController {
         Database::execute("UPDATE remote_backup_destinations SET last_test_at = NOW() WHERE id = ?", [$id]);
         if ($result['success']) { Session::flash('success', 'Connection test passed: ' . ($result['message'] ?? '')); }
         else { Session::flash('error', 'Connection test failed: ' . ($result['error'] ?? 'Unknown')); }
-        header('Location: ' . APP_URL . '/admin/backupDestinations');
+        header('Location: ' . APP_URL . '/admin/backup-destinations');
         exit;
     }
 
     private function backupDestinationsDelete(): void {
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . APP_URL . '/admin/backupDestinations'); exit; }
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . APP_URL . '/admin/backup-destinations'); exit; }
         CSRF::validateOrFail();
         $id = (int)($_POST['id'] ?? 0);
         if ($id) {
@@ -785,16 +800,16 @@ class AdminController {
             AuditLog::log('remote_backup_destination_deleted', Session::getUserId(), 'destination', $id);
             Session::flash('success', 'Destination deleted.');
         }
-        header('Location: ' . APP_URL . '/admin/backupDestinations');
+        header('Location: ' . APP_URL . '/admin/backup-destinations');
         exit;
     }
 
     private function backupDestinationsUpload(): void {
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . APP_URL . '/admin/backupDestinations'); exit; }
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . APP_URL . '/admin/backup-destinations'); exit; }
         CSRF::validateOrFail();
         $backupId = (int)($_POST['backup_id'] ?? 0);
         $destId = (int)($_POST['destination_id'] ?? 0);
-        if (!$backupId || !$destId) { Session::flash('error', 'Select a backup and destination.'); header('Location: ' . APP_URL . '/admin/backupDestinations'); exit; }
+        if (!$backupId || !$destId) { Session::flash('error', 'Select a backup and destination.'); header('Location: ' . APP_URL . '/admin/backup-destinations'); exit; }
 
         $result = RemoteBackupService::upload($backupId, $destId);
         if ($result['success']) {
@@ -803,7 +818,136 @@ class AdminController {
         } else {
             Session::flash('error', 'Upload failed: ' . ($result['error'] ?? 'Unknown'));
         }
-        header('Location: ' . APP_URL . '/admin/backupDestinations');
+        header('Location: ' . APP_URL . '/admin/backup-destinations');
+        exit;
+    }
+
+    // ================================================================
+    // ONEDRIVE OAUTH CONNECT/CALLBACK
+    // ================================================================
+
+    /**
+     * Initiate OneDrive OAuth flow.
+     * Generates state token, stores in session, redirects to Microsoft authorize URL.
+     */
+    private function onedriveConnect(): void {
+        $destId = (int)($_GET['id'] ?? $_POST['id'] ?? 0);
+        if (!$destId) { Session::flash('error', 'Destination ID required.'); header('Location: ' . APP_URL . '/admin/backup-destinations'); exit; }
+
+        $dest = Database::fetchOne("SELECT * FROM remote_backup_destinations WHERE id = ? AND provider = 'onedrive'", [$destId]);
+        if (!$dest) { Session::flash('error', 'OneDrive destination not found.'); header('Location: ' . APP_URL . '/admin/backup-destinations'); exit; }
+
+        $config = RemoteBackupService::decryptConfigPublic($dest['encrypted_config']);
+        if (!$config || empty($config['client_id'])) {
+            Session::flash('error', 'OneDrive destination missing client_id. Edit the destination first.');
+            header('Location: ' . APP_URL . '/admin/backup-destinations');
+            exit;
+        }
+
+        // Generate OAuth state token
+        $state = bin2hex(random_bytes(32));
+        $_SESSION['onedrive_oauth_state'] = $state;
+        $_SESSION['onedrive_oauth_dest_id'] = $destId;
+
+        $redirectUri = rtrim(APP_URL, '/') . '/admin/backup-destinations/onedrive-callback';
+        $params = http_build_query([
+            'client_id' => $config['client_id'],
+            'response_type' => 'code',
+            'redirect_uri' => $redirectUri,
+            'scope' => 'offline_access Files.ReadWrite',
+            'state' => $state,
+            'response_mode' => 'query'
+        ]);
+
+        $authorizeUrl = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?' . $params;
+        header('Location: ' . $authorizeUrl);
+        exit;
+    }
+
+    /**
+     * Handle OneDrive OAuth callback.
+     * Verifies state, exchanges code for tokens, stores refresh_token encrypted.
+     */
+    private function onedriveCallback(): void {
+        $state = $_GET['state'] ?? '';
+        $code = $_GET['code'] ?? '';
+        $error = $_GET['error'] ?? '';
+
+        // Check for OAuth error
+        if ($error) {
+            $errorDesc = $_GET['error_description'] ?? $error;
+            Session::flash('error', 'OneDrive authorization failed: ' . htmlspecialchars($errorDesc));
+            header('Location: ' . APP_URL . '/admin/backup-destinations');
+            exit;
+        }
+
+        // Verify state token
+        $expectedState = $_SESSION['onedrive_oauth_state'] ?? '';
+        $destId = (int)($_SESSION['onedrive_oauth_dest_id'] ?? 0);
+
+        // Clear session state immediately
+        unset($_SESSION['onedrive_oauth_state'], $_SESSION['onedrive_oauth_dest_id']);
+
+        if (empty($state) || !hash_equals($expectedState, $state)) {
+            Session::flash('error', 'OneDrive OAuth state mismatch. Possible CSRF attack. Try again.');
+            header('Location: ' . APP_URL . '/admin/backup-destinations');
+            exit;
+        }
+
+        if (empty($code) || !$destId) {
+            Session::flash('error', 'OneDrive authorization code missing.');
+            header('Location: ' . APP_URL . '/admin/backup-destinations');
+            exit;
+        }
+
+        // Load destination config
+        $dest = Database::fetchOne("SELECT * FROM remote_backup_destinations WHERE id = ? AND provider = 'onedrive'", [$destId]);
+        if (!$dest) { Session::flash('error', 'Destination not found.'); header('Location: ' . APP_URL . '/admin/backup-destinations'); exit; }
+
+        $config = RemoteBackupService::decryptConfigPublic($dest['encrypted_config']);
+        if (!$config) { Session::flash('error', 'Cannot decrypt destination config.'); header('Location: ' . APP_URL . '/admin/backup-destinations'); exit; }
+
+        // Exchange code for tokens
+        $redirectUri = rtrim(APP_URL, '/') . '/admin/backup-destinations/onedrive-callback';
+        $tokenUrl = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
+
+        $ch = curl_init($tokenUrl);
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => http_build_query([
+                'client_id' => $config['client_id'],
+                'client_secret' => $config['client_secret'] ?? '',
+                'code' => $code,
+                'redirect_uri' => $redirectUri,
+                'grant_type' => 'authorization_code',
+                'scope' => 'offline_access Files.ReadWrite'
+            ]),
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 15
+        ]);
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        $tokenData = json_decode($response, true);
+
+        if ($httpCode !== 200 || empty($tokenData['refresh_token'])) {
+            $errorMsg = $tokenData['error_description'] ?? $tokenData['error'] ?? 'Token exchange failed (HTTP ' . $httpCode . ')';
+            Session::flash('error', 'OneDrive token exchange failed: ' . htmlspecialchars($errorMsg));
+            header('Location: ' . APP_URL . '/admin/backup-destinations');
+            exit;
+        }
+
+        // Store refresh_token encrypted in destination config (NEVER log tokens)
+        $config['refresh_token'] = $tokenData['refresh_token'];
+        $config['onedrive_connected_at'] = date('c');
+        $encryptedConfig = RemoteBackupService::encryptConfig($config);
+
+        Database::execute("UPDATE remote_backup_destinations SET encrypted_config = ?, last_test_at = NOW(), last_error = NULL WHERE id = ?", [$encryptedConfig, $destId]);
+
+        AuditLog::log('onedrive_connected', Session::getUserId(), 'destination', $destId);
+        Session::flash('success', 'OneDrive connected successfully! Refresh token stored encrypted.');
+        header('Location: ' . APP_URL . '/admin/backup-destinations');
         exit;
     }
 }

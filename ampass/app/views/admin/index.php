@@ -7,6 +7,12 @@ $users = $data['users'] ?? [];
 $recentLogs = $data['recentLogs'] ?? [];
 $csrfToken = $data['csrfToken'] ?? CSRF::generateToken();
 $success = Session::flash('success');
+$updateAvailable = $data['updateAvailable'] ?? false;
+$latestVersion = $data['latestVersion'] ?? '';
+$lastBackupDate = $data['lastBackupDate'] ?? null;
+$lastRemoteBackupStatus = $data['lastRemoteBackupStatus'] ?? null;
+$lastRemoteBackupDate = $data['lastRemoteBackupDate'] ?? null;
+$emailConfigured = $data['emailConfigured'] ?? false;
 ?>
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
@@ -36,6 +42,12 @@ $success = Session::flash('success');
             <a href="<?= APP_URL ?>/admin/users" class="admin-nav-item">Users</a>
             <a href="<?= APP_URL ?>/admin/settings" class="admin-nav-item">Settings</a>
             <a href="<?= APP_URL ?>/admin/logs" class="admin-nav-item">Audit Logs</a>
+            <a href="<?= APP_URL ?>/admin/extensions" class="admin-nav-item">Extensions</a>
+            <a href="<?= APP_URL ?>/admin/updates" class="admin-nav-item">Updates</a>
+            <a href="<?= APP_URL ?>/admin/backups" class="admin-nav-item">Backups</a>
+            <a href="<?= APP_URL ?>/admin/backup-destinations" class="admin-nav-item">Remote Backup</a>
+            <a href="<?= APP_URL ?>/admin/releases" class="admin-nav-item">Releases</a>
+            <a href="<?= APP_URL ?>/admin/email" class="admin-nav-item">Email</a>
         </div>
 
         <!-- Stats -->
@@ -62,6 +74,30 @@ $success = Session::flash('success');
                 <div class="stat-content">
                     <span class="stat-value"><?= PHP_VERSION ?></span>
                     <span class="stat-label">PHP Version</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-content">
+                    <span class="stat-value"><?= $updateAvailable ? '⬆️ v' . htmlspecialchars($latestVersion) : '✅ Current' ?></span>
+                    <span class="stat-label"><a href="<?= APP_URL ?>/admin/updates" style="color:inherit;text-decoration:none;">Updates</a></span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-content">
+                    <span class="stat-value"><?= $lastBackupDate ? date('M j', strtotime($lastBackupDate)) : '—' ?></span>
+                    <span class="stat-label"><a href="<?= APP_URL ?>/admin/backups" style="color:inherit;text-decoration:none;">Last Backup</a></span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-content">
+                    <span class="stat-value"><?= $lastRemoteBackupStatus === 'uploaded' ? '✅ OK' : ($lastRemoteBackupStatus === 'failed' ? '❌ Failed' : '—') ?></span>
+                    <span class="stat-label"><a href="<?= APP_URL ?>/admin/backup-destinations" style="color:inherit;text-decoration:none;">Remote Backup</a></span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-content">
+                    <span class="stat-value"><?= $emailConfigured ? '✅ Active' : '⚠️ Not Set' ?></span>
+                    <span class="stat-label"><a href="<?= APP_URL ?>/admin/email" style="color:inherit;text-decoration:none;">Email</a></span>
                 </div>
             </div>
         </div>

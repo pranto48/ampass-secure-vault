@@ -31,7 +31,7 @@ Session::start();
 
 // Check maintenance mode (allow admin access to critical admin pages)
 $route = trim($_GET['route'] ?? '', '/');
-$isAdminRoute = str_starts_with($route, 'admin/updates') || str_starts_with($route, 'admin/backups') || str_starts_with($route, 'admin/backupDestinations') || str_starts_with($route, 'admin/email');
+$isAdminRoute = str_starts_with($route, 'admin/updates') || str_starts_with($route, 'admin/backups') || str_starts_with($route, 'admin/backupDestinations') || str_starts_with($route, 'admin/backup-destinations') || str_starts_with($route, 'admin/email');
 $isApiRoute = str_starts_with($route, 'api/');
 $isStaticAsset = str_starts_with($route, 'public/') || str_ends_with($route, '.css') || str_ends_with($route, '.js');
 

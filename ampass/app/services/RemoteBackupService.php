@@ -79,6 +79,62 @@ class RemoteBackupService {
 
     // ===== FTP/FTPS =====
 
+    /**
+     * Validate and sanitize a remote path segment.
+     * Rejects: .., null bytes, backslashes, empty segments.
+     */
+    private static function validateRemotePathPart(string $part): bool {
+        if (empty($part)) return false;
+        if ($part === '.' || $part === '..') return false;
+        if (str_contains($part, "\0")) return false;
+        if (str_contains($part, '\\')) return false;
+        if (str_contains($part, '..')) return false;
+        return true;
+    }
+
+    /**
+     * Sanitize remote backup filename.
+     * Enforces pattern: ampass-backup-YYYY-mm-dd-HHMMSS.ampass-backup
+     */
+    private static function sanitizeRemoteFilename(string $name): ?string {
+        if (preg_match('/^ampass-backup-\d{4}-\d{2}-\d{2}-\d{6}\.ampass-backup$/', $name)) {
+            return $name;
+        }
+        return null;
+    }
+
+    /**
+     * Recursively create remote FTP directories.
+     * Splits path by / and creates each missing part.
+     */
+    private static function ftpMkdirRecursive($conn, string $dir): bool {
+        if (empty($dir) || $dir === '/') return true;
+
+        $parts = explode('/', trim($dir, '/'));
+        $currentPath = '';
+
+        foreach ($parts as $part) {
+            if (!self::validateRemotePathPart($part)) {
+                return false;
+            }
+            $currentPath .= '/' . $part;
+
+            // Try to change to directory — if it works, it exists
+            if (@ftp_chdir($conn, $currentPath)) {
+                continue;
+            }
+
+            // Directory doesn't exist, create it
+            if (!@ftp_mkdir($conn, $currentPath)) {
+                // Could not create — might be permission issue
+                return false;
+            }
+        }
+
+        // Change to final directory
+        return @ftp_chdir($conn, '/' . trim($dir, '/'));
+    }
+
     private static function uploadFtp(string $localPath, string $remoteName, array $config, bool $ssl = false): array {
         $host = $config['host'] ?? '';
         $port = (int)($config['port'] ?? 21);
@@ -89,21 +145,45 @@ class RemoteBackupService {
 
         if (!$host || !$user) return ['success' => false, 'error' => 'FTP host and username required'];
 
+        // Validate remote filename pattern
+        $sanitizedName = self::sanitizeRemoteFilename($remoteName);
+        if (!$sanitizedName) {
+            return ['success' => false, 'error' => 'Invalid remote filename pattern. Expected: ampass-backup-YYYY-mm-dd-HHMMSS.ampass-backup'];
+        }
+        $remoteName = $sanitizedName;
+
         $conn = $ssl ? @ftp_ssl_connect($host, $port, 15) : @ftp_connect($host, $port, 15);
         if (!$conn) return ['success' => false, 'error' => 'Cannot connect to FTP server'];
 
         if (!@ftp_login($conn, $user, $pass)) { ftp_close($conn); return ['success' => false, 'error' => 'FTP login failed']; }
         if ($passive) ftp_pasv($conn, true);
 
-        // Create directory if needed
-        @ftp_mkdir($conn, $dir);
-        @ftp_chdir($conn, $dir);
+        // Recursively create remote directory
+        if (!self::ftpMkdirRecursive($conn, $dir)) {
+            ftp_close($conn);
+            return ['success' => false, 'error' => 'Failed to create remote directory: ' . $dir . '. Check path for invalid characters.'];
+        }
 
         $remotePath = $dir . '/' . $remoteName;
         $uploaded = @ftp_put($conn, $remoteName, $localPath, FTP_BINARY);
+
+        if (!$uploaded) {
+            ftp_close($conn);
+            return ['success' => false, 'error' => 'FTP upload failed'];
+        }
+
+        // Verify remote file size matches local
+        $localSize = filesize($localPath);
+        $remoteSize = @ftp_size($conn, $remoteName);
         ftp_close($conn);
 
-        if (!$uploaded) return ['success' => false, 'error' => 'FTP upload failed'];
+        if ($remoteSize >= 0 && $remoteSize !== $localSize) {
+            return [
+                'success' => false,
+                'error' => "FTP upload size mismatch. Local: {$localSize} bytes, Remote: {$remoteSize} bytes. File may be corrupted."
+            ];
+        }
+
         return ['success' => true, 'remote_path' => $remotePath];
     }
 

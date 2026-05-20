@@ -42,10 +42,18 @@ AMPass can check GitHub for updates and apply them from the admin panel.
 1. Encrypted backup created automatically
 2. Maintenance mode enabled (users see "updating" page)
 3. Update package downloaded from GitHub
-4. Files extracted and applied (config/app_storage excluded)
-5. Database migrations run
-6. Maintenance mode disabled
-7. Update history recorded
+4. **Safe ZIP extraction** — every entry validated BEFORE extraction:
+   - Rejects path traversal (`../`), absolute paths, null bytes, drive letters
+   - Rejects symlink entries
+   - Extracts each file individually (never uses `extractTo()` on untrusted ZIP)
+   - Final path verified to stay inside staging directory
+5. Files copied to app root with rollback tracking:
+   - Existing files backed up to rollback directory
+   - Newly-created files tracked separately
+   - New directories tracked for cleanup
+6. Database migrations run
+7. Maintenance mode disabled
+8. Update history recorded
 
 ## What's Never Overwritten
 
@@ -57,10 +65,15 @@ AMPass can check GitHub for updates and apply them from the admin panel.
 
 ## Rollback
 
-If update fails:
-- Maintenance mode is disabled
+If update or migration fails:
+- **Overwritten files** restored from rollback directory
+- **Newly-created files** deleted (did not exist before update)
+- **Empty directories** created during update removed (deepest first)
+- Nothing outside app root is ever deleted
+- Maintenance mode disabled
 - Update marked as "failed" in history
 - Pre-update backup available for manual restore
+- Rollback summary logged to PHP error log
 
 ## Troubleshooting
 

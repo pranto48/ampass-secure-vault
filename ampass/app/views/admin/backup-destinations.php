@@ -19,8 +19,8 @@ $error = Session::flash('error');
     <div class="card">
         <div class="card-header"><h2 class="card-title">Add Destination</h2></div>
         <div class="card-body">
-            <div class="alert alert-warning" style="margin-bottom:12px;">⚠️ Plain FTP is not recommended. Use FTPS, SFTP, or OneDrive when possible. Only encrypted .ampass-backup files are uploaded.</div>
-            <form method="POST" action="<?= APP_URL ?>/admin/backupDestinations/save">
+            <div class="alert alert-warning" style="margin-bottom:12px;">⚠️ Plain FTP is not recommended. PHP ftp_ssl_connect does not always verify TLS certificates. Use SFTP or OneDrive for stronger transport security. Only encrypted .ampass-backup files are uploaded.</div>
+            <form method="POST" action="<?= APP_URL ?>/admin/backup-destinations/save">
                 <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
                 <div class="form-row">
                     <div class="form-group"><label class="form-label">Name</label><input type="text" name="name" class="form-input" required placeholder="My Backup Server"></div>
@@ -34,7 +34,13 @@ $error = Session::flash('error');
                     <div class="form-group"><label class="form-label">Username</label><input type="text" name="username" class="form-input"></div>
                     <div class="form-group"><label class="form-label">Password</label><input type="password" name="password" class="form-input"></div>
                 </div>
-                <div class="form-group"><label class="form-label">Remote Directory</label><input type="text" name="remote_directory" class="form-input" value="/ampass-backups"></div>
+                <div class="form-group"><label class="form-label">Remote Directory</label><input type="text" name="remote_directory" class="form-input" value="/ampass-backups" placeholder="/ampass/backups/server1"></div>
+                <div class="form-row" id="onedrive-fields" style="display:none;">
+                    <div class="form-group"><label class="form-label">Client ID (Azure App)</label><input type="text" name="client_id" class="form-input" placeholder="Azure AD Application (client) ID"></div>
+                    <div class="form-group"><label class="form-label">Client Secret</label><input type="password" name="client_secret" class="form-input"></div>
+                </div>
+                <div class="form-group" id="onedrive-folder-field" style="display:none;"><label class="form-label">OneDrive Folder Path</label><input type="text" name="folder_path" class="form-input" value="AMPass Backups"></div>
+                <div id="onedrive-redirect-info" style="display:none;" class="alert alert-info">Redirect URI for Azure App: <code><?= htmlspecialchars(rtrim(APP_URL, '/')) ?>/admin/backup-destinations/onedrive-callback</code></div>
                 <label class="checkbox-label"><input type="checkbox" name="passive_mode" checked> Passive mode (FTP/FTPS)</label>
                 <button type="submit" class="btn btn-primary" style="margin-top:12px;">Add Destination</button>
             </form>
@@ -55,8 +61,11 @@ $error = Session::flash('error');
                 <td><?= $d['enabled'] ? '✅ Enabled' : '❌ Disabled' ?></td>
                 <td><?= $d['last_success_at'] ? date('M j g:i A', strtotime($d['last_success_at'])) : '—' ?></td>
                 <td>
-                    <form method="POST" action="<?= APP_URL ?>/admin/backupDestinations/test" style="display:inline;"><input type="hidden" name="csrf_token" value="<?= $csrfToken ?>"><input type="hidden" name="id" value="<?= $d['id'] ?>"><button type="submit" class="btn btn-sm btn-ghost">Test</button></form>
-                    <form method="POST" action="<?= APP_URL ?>/admin/backupDestinations/delete" style="display:inline;" onsubmit="return confirm('Delete?')"><input type="hidden" name="csrf_token" value="<?= $csrfToken ?>"><input type="hidden" name="id" value="<?= $d['id'] ?>"><button type="submit" class="btn btn-sm btn-danger">Delete</button></form>
+                    <?php if ($d['provider'] === 'onedrive'): ?>
+                    <a href="<?= APP_URL ?>/admin/backup-destinations/onedrive-connect?id=<?= $d['id'] ?>" class="btn btn-sm btn-primary">Connect OneDrive</a>
+                    <?php endif; ?>
+                    <form method="POST" action="<?= APP_URL ?>/admin/backup-destinations/test" style="display:inline;"><input type="hidden" name="csrf_token" value="<?= $csrfToken ?>"><input type="hidden" name="id" value="<?= $d['id'] ?>"><button type="submit" class="btn btn-sm btn-ghost">Test</button></form>
+                    <form method="POST" action="<?= APP_URL ?>/admin/backup-destinations/delete" style="display:inline;" onsubmit="return confirm('Delete?')"><input type="hidden" name="csrf_token" value="<?= $csrfToken ?>"><input type="hidden" name="id" value="<?= $d['id'] ?>"><button type="submit" class="btn btn-sm btn-danger">Delete</button></form>
                 </td>
             </tr>
             <?php endforeach; ?>
@@ -70,7 +79,7 @@ $error = Session::flash('error');
     <div class="card">
         <div class="card-header"><h2 class="card-title">Upload Backup to Remote</h2></div>
         <div class="card-body">
-            <form method="POST" action="<?= APP_URL ?>/admin/backupDestinations/upload">
+            <form method="POST" action="<?= APP_URL ?>/admin/backup-destinations/upload">
                 <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
                 <div class="form-row">
                     <div class="form-group"><label class="form-label">Backup</label><select name="backup_id" class="form-select"><?php foreach ($backups as $b): ?><option value="<?= $b['id'] ?>"><?= htmlspecialchars($b['filename']) ?></option><?php endforeach; ?></select></div>
@@ -82,5 +91,13 @@ $error = Session::flash('error');
     </div>
     <?php endif; ?>
 </div>
+<script>
+document.querySelector('select[name="provider"]').addEventListener('change', function() {
+    const isOneDrive = this.value === 'onedrive';
+    document.getElementById('onedrive-fields').style.display = isOneDrive ? '' : 'none';
+    document.getElementById('onedrive-folder-field').style.display = isOneDrive ? '' : 'none';
+    document.getElementById('onedrive-redirect-info').style.display = isOneDrive ? '' : 'none';
+});
+</script>
 </body>
 </html>

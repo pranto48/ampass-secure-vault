@@ -17,6 +17,11 @@ AMPass can upload encrypted `.ampass-backup` files to remote storage for offsite
 - Remote credentials are encrypted at rest using APP_SECRET
 - Credentials are masked in the admin UI
 - Upload validates local file path before sending
+- Remote filename enforced: `ampass-backup-YYYY-mm-dd-HHMMSS.ampass-backup`
+- FTP: recursive directory creation with path validation (rejects `..`, null bytes, backslashes)
+- FTP: file size verified after upload (local vs remote comparison)
+- OneDrive: refresh token stored encrypted, never logged
+- OneDrive: OAuth state token prevents CSRF on callback
 
 ## Setup
 
@@ -29,7 +34,11 @@ AMPass can upload encrypted `.ampass-backup` files to remote storage for offsite
 5. Click **Test Connection**
 6. Save
 
-⚠️ Plain FTP transmits credentials in cleartext. Use FTPS or SFTP when possible.
+⚠️ Plain FTP transmits credentials in cleartext. PHP `ftp_ssl_connect` does not always verify TLS certificates. Use SFTP or OneDrive for stronger transport security.
+
+**Nested directories:** Remote paths like `/ampass/backups/server1` are created recursively. Each path segment is validated (no `..`, no null bytes, no backslashes).
+
+**Size verification:** After upload, remote file size is compared with local file. Size mismatch fails the upload.
 
 ### SFTP
 
@@ -76,15 +85,4 @@ Generate cron token in Admin → Backups → Settings.
 
 ## Retention
 
-Configure `backup_remote_retention_count` to automatically delete old remote backups (keeps last N files matching `ampass-backup-*.ampass-backup` pattern).
-
-## Restore from Remote Backup
-
-1. Download the `.ampass-backup` file from your remote storage
-2. Go to Admin → Backups → Upload and Restore
-3. Enter the backup password
-4. Choose restore mode
-
-## ⚠️ Not Production Ready
-
-AMPass remote backup system requires professional security audit before real credential storage.
+Configure `backup_remote_retention_count` to automatically delete old remote backups (keeps last N files matching `ampass-b
