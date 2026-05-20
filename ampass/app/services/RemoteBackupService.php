@@ -305,4 +305,11 @@ class RemoteBackupService {
         $json = openssl_decrypt($ct, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
         return $json ? json_decode($json, true) : null;
     }
+
+    /**
+     * Public wrapper for decryptConfig (used by admin test)
+     */
+    public static function decryptConfigPublic(string $encrypted): ?array {
+        return self::decryptConfig($encrypted);
+    }
 }

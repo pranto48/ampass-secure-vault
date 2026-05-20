@@ -29,14 +29,15 @@ Security::setHeaders();
 // Start secure session
 Session::start();
 
-// Check maintenance mode (allow admin access to /admin/updates and /admin/backups)
+// Check maintenance mode (allow admin access to critical admin pages)
 $route = trim($_GET['route'] ?? '', '/');
-$isAdminRoute = str_starts_with($route, 'admin/updates') || str_starts_with($route, 'admin/backups');
+$isAdminRoute = str_starts_with($route, 'admin/updates') || str_starts_with($route, 'admin/backups') || str_starts_with($route, 'admin/backupDestinations') || str_starts_with($route, 'admin/email');
 $isApiRoute = str_starts_with($route, 'api/');
+$isStaticAsset = str_starts_with($route, 'public/') || str_ends_with($route, '.css') || str_ends_with($route, '.js');
 
 try {
     $maintenance = Database::fetchOne("SELECT setting_value FROM app_settings WHERE setting_key = 'maintenance_mode'");
-    if ($maintenance && $maintenance['setting_value'] === '1' && !$isAdminRoute) {
+    if ($maintenance && $maintenance['setting_value'] === '1' && !$isAdminRoute && !$isStaticAsset) {
         if ($isApiRoute) {
             header('Content-Type: application/json');
             http_response_code(503);

@@ -6,6 +6,8 @@
 
 require_once __DIR__ . '/../services/BackupService.php';
 require_once __DIR__ . '/../services/EmailService.php';
+require_once __DIR__ . '/../services/UpdateService.php';
+require_once __DIR__ . '/../services/RemoteBackupService.php';
 
 require_once __DIR__ . '/../models/User.php';
 require_once __DIR__ . '/../models/AuditLog.php';
@@ -627,6 +629,181 @@ class AdminController {
         }
 
         header('Location: ' . APP_URL . '/admin/email');
+        exit;
+    }
+
+    // ================================================================
+    // UPDATES
+    // Routes: /admin/updates, /admin/updates/check, /admin/updates/apply
+    // ================================================================
+
+    public function updates(?string $subAction = null): void {
+        switch ($subAction) {
+            case 'check': $this->updatesCheck(); return;
+            case 'apply': $this->updatesApply(); return;
+            case 'migrations': $this->updatesRunMigrations(); return;
+        }
+
+        $data = [
+            'current_version' => UpdateService::getInstalledVersion(),
+            'installed_sha' => UpdateService::getSetting('installed_commit_sha', ''),
+            'latest_version' => UpdateService::getSetting('latest_version', ''),
+            'latest_sha' => UpdateService::getSetting('latest_commit_sha', ''),
+            'update_available' => UpdateService::getSetting('update_available', '0') === '1',
+            'last_checked' => UpdateService::getSetting('last_update_check_at', 'Never'),
+            'history' => UpdateService::getUpdateHistory(10),
+            'pending_migrations' => UpdateService::getPendingMigrations(),
+            'csrfToken' => CSRF::generateToken()
+        ];
+        require __DIR__ . '/../views/admin/updates.php';
+    }
+
+    private function updatesCheck(): void {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . APP_URL . '/admin/updates'); exit; }
+        CSRF::validateOrFail();
+        $result = UpdateService::checkForUpdates();
+        AuditLog::log('update_check', Session::getUserId(), null, null, ['available' => $result['update_available'] ?? false]);
+        if (!empty($result['error'])) { Session::flash('error', $result['error']); }
+        elseif ($result['update_available']) { Session::flash('success', 'Update available: v' . ($result['latest_version'] ?? '?')); }
+        else { Session::flash('success', 'AMPass is up to date.'); }
+        header('Location: ' . APP_URL . '/admin/updates');
+        exit;
+    }
+
+    private function updatesApply(): void {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . APP_URL . '/admin/updates'); exit; }
+        CSRF::validateOrFail();
+
+        $confirmation = trim($_POST['confirmation'] ?? '');
+        $backupPassword = $_POST['backup_password'] ?? '';
+
+        if ($confirmation !== 'UPDATE AMPASS') { Session::flash('error', 'Type "UPDATE AMPASS" to confirm.'); header('Location: ' . APP_URL . '/admin/updates'); exit; }
+        if (strlen($backupPassword) < 8) { Session::flash('error', 'Backup password must be at least 8 characters.'); header('Location: ' . APP_URL . '/admin/updates'); exit; }
+
+        AuditLog::log('update_started', Session::getUserId());
+        $result = UpdateService::applyUpdate($backupPassword, Session::getUserId());
+
+        if ($result['success']) {
+            AuditLog::log('update_completed', Session::getUserId(), null, null, ['version' => $result['version'] ?? '']);
+            Session::flash('success', 'Update completed! v' . ($result['version'] ?? '') . ' — ' . ($result['files_updated'] ?? 0) . ' files updated.');
+        } else {
+            AuditLog::log('update_failed', Session::getUserId(), null, null, ['error' => substr($result['error'] ?? '', 0, 200)]);
+            Session::flash('error', 'Update failed: ' . ($result['error'] ?? 'Unknown error'));
+        }
+        header('Location: ' . APP_URL . '/admin/updates');
+        exit;
+    }
+
+    private function updatesRunMigrations(): void {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . APP_URL . '/admin/updates'); exit; }
+        CSRF::validateOrFail();
+        $result = UpdateService::runPendingMigrations();
+        if ($result['failed']) { Session::flash('error', 'Migration failed: ' . $result['failed']); }
+        elseif (count($result['applied']) > 0) { Session::flash('success', 'Applied ' . count($result['applied']) . ' migration(s).'); }
+        else { Session::flash('success', 'No pending migrations.'); }
+        header('Location: ' . APP_URL . '/admin/updates');
+        exit;
+    }
+
+    // ================================================================
+    // BACKUP DESTINATIONS
+    // Routes: /admin/backupDestinations, /admin/backupDestinations/save, etc.
+    // ================================================================
+
+    public function backupDestinations(?string $subAction = null): void {
+        switch ($subAction) {
+            case 'save': $this->backupDestinationsSave(); return;
+            case 'test': $this->backupDestinationsTest(); return;
+            case 'delete': $this->backupDestinationsDelete(); return;
+            case 'upload': $this->backupDestinationsUpload(); return;
+        }
+
+        $destinations = Database::fetchAll("SELECT * FROM remote_backup_destinations ORDER BY created_at DESC");
+        $backups = Database::fetchAll("SELECT id, filename, created_at FROM backup_files ORDER BY created_at DESC LIMIT 10");
+        $data = ['destinations' => $destinations, 'backups' => $backups, 'csrfToken' => CSRF::generateToken()];
+        require __DIR__ . '/../views/admin/backup-destinations.php';
+    }
+
+    private function backupDestinationsSave(): void {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . APP_URL . '/admin/backupDestinations'); exit; }
+        CSRF::validateOrFail();
+
+        $name = Security::sanitize($_POST['name'] ?? '');
+        $provider = $_POST['provider'] ?? '';
+        if (!in_array($provider, ['ftp', 'ftps', 'sftp', 'onedrive'], true)) { Session::flash('error', 'Invalid provider.'); header('Location: ' . APP_URL . '/admin/backupDestinations'); exit; }
+
+        $config = [
+            'host' => trim($_POST['host'] ?? ''),
+            'port' => (int)($_POST['port'] ?? ($provider === 'sftp' ? 22 : 21)),
+            'username' => trim($_POST['username'] ?? ''),
+            'password' => $_POST['password'] ?? '',
+            'remote_directory' => trim($_POST['remote_directory'] ?? '/ampass-backups'),
+            'passive_mode' => isset($_POST['passive_mode']),
+            'use_tls' => $provider === 'ftps',
+            'client_id' => trim($_POST['client_id'] ?? ''),
+            'client_secret' => $_POST['client_secret'] ?? '',
+            'refresh_token' => $_POST['refresh_token'] ?? '',
+            'folder_path' => trim($_POST['folder_path'] ?? 'AMPass Backups')
+        ];
+
+        $encryptedConfig = RemoteBackupService::encryptConfig($config);
+
+        Database::insert(
+            "INSERT INTO remote_backup_destinations (name, provider, enabled, encrypted_config, created_by_user_id, created_at) VALUES (?, ?, 1, ?, ?, NOW())",
+            [$name, $provider, $encryptedConfig, Session::getUserId()]
+        );
+
+        AuditLog::log('remote_backup_destination_created', Session::getUserId(), null, null, ['name' => $name, 'provider' => $provider]);
+        Session::flash('success', "Destination '{$name}' ({$provider}) added.");
+        header('Location: ' . APP_URL . '/admin/backupDestinations');
+        exit;
+    }
+
+    private function backupDestinationsTest(): void {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . APP_URL . '/admin/backupDestinations'); exit; }
+        CSRF::validateOrFail();
+        $id = (int)($_POST['id'] ?? 0);
+        $dest = Database::fetchOne("SELECT * FROM remote_backup_destinations WHERE id = ?", [$id]);
+        if (!$dest) { Session::flash('error', 'Destination not found.'); header('Location: ' . APP_URL . '/admin/backupDestinations'); exit; }
+
+        $config = RemoteBackupService::decryptConfigPublic($dest['encrypted_config']);
+        $result = RemoteBackupService::testConnection($config ?: [], $dest['provider']);
+
+        Database::execute("UPDATE remote_backup_destinations SET last_test_at = NOW() WHERE id = ?", [$id]);
+        if ($result['success']) { Session::flash('success', 'Connection test passed: ' . ($result['message'] ?? '')); }
+        else { Session::flash('error', 'Connection test failed: ' . ($result['error'] ?? 'Unknown')); }
+        header('Location: ' . APP_URL . '/admin/backupDestinations');
+        exit;
+    }
+
+    private function backupDestinationsDelete(): void {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . APP_URL . '/admin/backupDestinations'); exit; }
+        CSRF::validateOrFail();
+        $id = (int)($_POST['id'] ?? 0);
+        if ($id) {
+            Database::execute("DELETE FROM remote_backup_destinations WHERE id = ?", [$id]);
+            AuditLog::log('remote_backup_destination_deleted', Session::getUserId(), 'destination', $id);
+            Session::flash('success', 'Destination deleted.');
+        }
+        header('Location: ' . APP_URL . '/admin/backupDestinations');
+        exit;
+    }
+
+    private function backupDestinationsUpload(): void {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . APP_URL . '/admin/backupDestinations'); exit; }
+        CSRF::validateOrFail();
+        $backupId = (int)($_POST['backup_id'] ?? 0);
+        $destId = (int)($_POST['destination_id'] ?? 0);
+        if (!$backupId || !$destId) { Session::flash('error', 'Select a backup and destination.'); header('Location: ' . APP_URL . '/admin/backupDestinations'); exit; }
+
+        $result = RemoteBackupService::upload($backupId, $destId);
+        if ($result['success']) {
+            AuditLog::log('remote_backup_uploaded', Session::getUserId(), 'backup', $backupId, ['destination' => $destId]);
+            Session::flash('success', 'Backup uploaded to remote destination.');
+        } else {
+            Session::flash('error', 'Upload failed: ' . ($result['error'] ?? 'Unknown'));
+        }
+        header('Location: ' . APP_URL . '/admin/backupDestinations');
         exit;
     }
 }
