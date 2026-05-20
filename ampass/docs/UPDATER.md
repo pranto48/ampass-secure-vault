@@ -99,12 +99,21 @@ AMPass supports two migration formats:
 - Executed via `PDO::exec()`
 - Good for simple DDL: CREATE TABLE, ALTER TABLE, INSERT
 - **Limitation:** `DELIMITER` and `CREATE PROCEDURE` are NOT supported (these are mysql CLI commands, not SQL)
+- Empty/comment-only SQL files are skipped (used as stubs when a PHP companion exists)
 
 ### PHP Migrations (`.php` files)
 - For complex/conditional logic that SQL alone cannot handle
 - Can query `INFORMATION_SCHEMA` to check if columns/indexes exist before adding
 - Must `return true` on success or throw an Exception on failure
-- Has access to `Database::getInstance()` (PDO)
+- Has access to `$pdo` (PDO instance from caller) or `Database::getInstance()`
+- Idempotent: safe to re-run on partially-applied databases
+
+### Critical Safety Rules
+
+1. **Failed migrations are NEVER marked as applied** — in both installer and updater
+2. On failure, installation/update stops immediately with a clear error message
+3. Safe to retry after fixing the underlying issue
+4. Migration 006 has special verification: even if marked applied, the installer checks actual DB state (enum values, columns, indexes) and re-runs if incomplete
 
 ### Precedence
 - If both `006_example.sql` and `006_example.php` exist, the `.php` file takes precedence
@@ -115,7 +124,14 @@ AMPass supports two migration formats:
 ```php
 <?php
 // database/migrations/006_example.php
-$pdo = Database::getInstance();
+// $pdo is available from the caller (installer or updater)
+if (!isset($pdo)) {
+    if (class_exists('Database')) {
+        $pdo = Database::getInstance();
+    } else {
+        throw new \Exception('No PDO connection available');
+    }
+}
 $dbName = $pdo->query("SELECT DATABASE()")->fetchColumn();
 
 // Check if column exists before adding

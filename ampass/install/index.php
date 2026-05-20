@@ -316,6 +316,11 @@ function performInstallation(array $data): string {
  * Run all migration files in database/migrations/ that haven't been run yet.
  * Creates a schema_migrations table to track which migrations have been applied.
  * Supports both .sql and .php migrations. PHP takes precedence if both exist.
+ *
+ * SECURITY:
+ * - Failed migrations are NEVER marked as applied.
+ * - On failure, returns error string and stops installation.
+ * - PHP migrations are used for conditional/idempotent logic (DELIMITER not supported by PDO).
  */
 function runMigrations(PDO $pdo): string {
     // Create migrations tracking table
@@ -343,6 +348,7 @@ function runMigrations(PDO $pdo): string {
     }
     foreach ($phpFiles as $file) {
         $base = pathinfo($file, PATHINFO_FILENAME);
+        // PHP takes precedence over SQL
         $migrations[$base] = ['file' => $file, 'type' => 'php', 'filename' => basename($file)];
     }
     ksort($migrations);
@@ -353,52 +359,104 @@ function runMigrations(PDO $pdo): string {
         // Check if any variant is already applied
         $stmt = $pdo->prepare("SELECT COUNT(*) FROM schema_migrations WHERE filename IN (?, ?, ?)");
         $stmt->execute([$filename, $base . '.sql', $base . '.php']);
-        if ($stmt->fetchColumn() > 0) {
-            continue; // Already applied
+        $alreadyApplied = (int)$stmt->fetchColumn() > 0;
+
+        // Special safety for migration 006: verify actual DB state even if marked applied
+        if ($base === '006_app_accounts_remote_desktop' && $alreadyApplied) {
+            if (!verifyMigration006State($pdo)) {
+                // DB state is incomplete — re-run the PHP migration
+                $alreadyApplied = false;
+                // Use the PHP file regardless of what was recorded
+                $phpFile = $migrationsDir . '/006_app_accounts_remote_desktop.php';
+                if (file_exists($phpFile)) {
+                    $migration = ['file' => $phpFile, 'type' => 'php', 'filename' => '006_app_accounts_remote_desktop.php'];
+                    $filename = '006_app_accounts_remote_desktop.php';
+                }
+            }
+        }
+
+        if ($alreadyApplied) {
+            continue;
         }
 
         // Run the migration
         try {
             if ($migration['type'] === 'php') {
                 // PHP migration: include the file, it must return true
-                // Make $pdo available via Database class (already loaded by installer)
                 $migrationResult = require $migration['file'];
                 if ($migrationResult !== true) {
-                    throw new \Exception("PHP migration did not return true");
+                    return "Migration failed: {$filename}: PHP migration did not return true";
                 }
             } else {
-                // SQL migration
+                // SQL migration — skip if empty/comment-only (stub for PHP companion)
                 $sql = file_get_contents($migration['file']);
-                if (empty(trim($sql))) continue;
+                $stripped = trim(preg_replace('/--[^\n]*/', '', $sql));
+                if (empty($stripped)) {
+                    // Empty SQL stub — skip silently (PHP companion handles it)
+                    continue;
+                }
                 $pdo->exec($sql);
             }
 
-            // Record as applied
+            // ONLY mark as applied after successful execution
             $stmt = $pdo->prepare("INSERT INTO schema_migrations (filename) VALUES (?)");
             $stmt->execute([$filename]);
-        } catch (PDOException $e) {
-            // Non-fatal: log but continue (tables may already exist from schema.sql)
-            error_log("AMPass migration warning ({$filename}): " . $e->getMessage());
 
-            // Still record it to avoid re-running
-            try {
-                $stmt = $pdo->prepare("INSERT IGNORE INTO schema_migrations (filename) VALUES (?)");
-                $stmt->execute([$filename]);
-            } catch (PDOException $e2) {
-                // Ignore
-            }
+        } catch (PDOException $e) {
+            // NEVER mark failed migration as applied
+            $safeMsg = substr($e->getMessage(), 0, 300);
+            error_log("AMPass migration FAILED ({$filename}): " . $safeMsg);
+            return "Migration failed: {$filename}: " . $safeMsg;
         } catch (\Exception $e) {
-            error_log("AMPass migration warning ({$filename}): " . $e->getMessage());
-            try {
-                $stmt = $pdo->prepare("INSERT IGNORE INTO schema_migrations (filename) VALUES (?)");
-                $stmt->execute([$filename]);
-            } catch (PDOException $e2) {
-                // Ignore
-            }
+            // NEVER mark failed migration as applied
+            $safeMsg = substr($e->getMessage(), 0, 300);
+            error_log("AMPass migration FAILED ({$filename}): " . $safeMsg);
+            return "Migration failed: {$filename}: " . $safeMsg;
         }
     }
 
     return ''; // Success
+}
+
+/**
+ * Verify that migration 006 actually applied correctly to the database.
+ * Returns true if all expected changes are present, false if incomplete.
+ */
+function verifyMigration006State(PDO $pdo): bool {
+    $dbName = $pdo->query("SELECT DATABASE()")->fetchColumn();
+
+    // Check item_type enum includes app_account
+    $stmt = $pdo->prepare(
+        "SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'vault_items' AND COLUMN_NAME = 'item_type'"
+    );
+    $stmt->execute([$dbName]);
+    $columnType = $stmt->fetchColumn();
+    if (!$columnType || !str_contains($columnType, 'app_account') || !str_contains($columnType, 'remote_desktop')) {
+        return false;
+    }
+
+    // Check host_hash column exists
+    $stmt = $pdo->prepare(
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'vault_items' AND COLUMN_NAME = 'host_hash'"
+    );
+    $stmt->execute([$dbName]);
+    if ((int)$stmt->fetchColumn() === 0) {
+        return false;
+    }
+
+    // Check idx_vault_host_hash index exists
+    $stmt = $pdo->prepare(
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'vault_items' AND INDEX_NAME = 'idx_vault_host_hash'"
+    );
+    $stmt->execute([$dbName]);
+    if ((int)$stmt->fetchColumn() === 0) {
+        return false;
+    }
+
+    return true;
 }
 
 $csrfToken = $_SESSION['install_csrf'];
