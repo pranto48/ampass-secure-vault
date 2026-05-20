@@ -36,8 +36,8 @@
     {
       "matches": ["<all_urls>"],
       "js": [
-        "src/content/form-detector.js",
         "src/content/autofill.js",
+        "src/content/form-detector.js",
         "src/content/save-detector.js"
       ],
       "css": [],

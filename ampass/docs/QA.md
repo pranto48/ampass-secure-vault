@@ -155,3 +155,41 @@
 - [ ] Extension autofill does NOT modify hidden inputs named `_token` or `_csrf`
 - [ ] Extension save-detector does NOT capture AMPass own login/unlock/register pages
 - [ ] Extension does NOT submit AMPass login form in a way that drops CSRF token
+
+## Browser Extension Field-Icon Autofill
+
+### Basic Autofill Flow
+- [ ] Save login for a website (e.g., example.com)
+- [ ] Reload extension from chrome://extensions
+- [ ] Open the website login page
+- [ ] AMPass field icon appears near password field
+- [ ] Click field icon while vault is LOCKED → shows "Unlock AMPass to autofill" message
+- [ ] Unlock extension (via popup)
+- [ ] Click field icon with ONE matching login → username/password fills automatically
+- [ ] Success toast "Filled by AMPass" appears briefly
+- [ ] Click field icon with MULTIPLE matches → dropdown appears with list
+- [ ] Select one from dropdown → correct credential fills
+- [ ] Dropdown closes after selection
+- [ ] Escape key closes dropdown
+- [ ] Click outside dropdown closes it
+
+### Error States
+- [ ] No saved login for current site → shows "No saved login for this site"
+- [ ] HTTP non-localhost page → shows "Autofill blocked on HTTP page" (unless setting enabled)
+- [ ] Localhost HTTP page → autofill works normally
+- [ ] Decrypt failure → shows "Could not decrypt this item" toast
+- [ ] Extension disconnected → shows "Could not connect to AMPass"
+
+### Security
+- [ ] AMPass own login/unlock/register pages are NOT autofilled
+- [ ] Hidden csrf_token fields are NOT modified by autofill
+- [ ] Hidden inputs named _token or _csrf are NOT filled
+- [ ] No automatic form submission happens after fill
+- [ ] React/Vue forms detect filled values (native setter + events dispatched)
+- [ ] Plaintext credentials cleared from memory after fill
+- [ ] Usage logged to server (item_id + action only, no secrets)
+
+### Multiple Forms
+- [ ] Page with multiple login forms → each gets its own icon
+- [ ] Clicking icon fills the correct form (not always the first one)
+- [ ] Icon repositions on scroll/resize

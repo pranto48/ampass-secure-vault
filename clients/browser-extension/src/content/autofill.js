@@ -8,6 +8,37 @@
 (function() {
   'use strict';
 
+  /**
+   * Exposed autofill function for form-detector.js to call directly.
+   * SECURITY: Credentials exist in memory only during this operation.
+   * @param {object} payload - { username, password }
+   * @param {object|null} preferredFormData - { passwordField, usernameField } or null for auto-detect
+   * @returns {boolean} true if fill succeeded
+   */
+  window.__ampassAutofill = function(payload, preferredFormData = null) {
+    if (!payload) return false;
+    const { username, password } = payload;
+
+    if (preferredFormData && preferredFormData.passwordField) {
+      // Use the specific form fields provided
+      if (preferredFormData.usernameField && username) {
+        fillField(preferredFormData.usernameField, username);
+      }
+      if (preferredFormData.passwordField && password) {
+        fillField(preferredFormData.passwordField, password);
+        preferredFormData.passwordField.setAttribute('data-ampass-filled', 'true');
+      }
+    } else {
+      // Fallback: auto-detect fields
+      performAutofill(payload);
+    }
+
+    // Clear sensitive data
+    payload.username = null;
+    payload.password = null;
+    return true;
+  };
+
   // Listen for autofill commands from popup/service worker
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'AUTOFILL') {

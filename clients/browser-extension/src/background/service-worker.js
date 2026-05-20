@@ -76,6 +76,12 @@ async function handleMessage(msg, sender) {
       return { success: true, settings: await Storage.getSettings() };
     case 'RESET_EXTENSION':
       return await resetExtension();
+    case 'LOG_USAGE':
+      return await logUsage(msg.payload);
+    case 'OPEN_POPUP':
+      // Chrome doesn't allow programmatic popup opening from content scripts.
+      // Return a message telling the user to click the icon.
+      return { success: false, error: 'Click the AMPass extension icon to open.' };
     default:
       return { success: false, error: 'Unknown message type' };
   }
@@ -403,7 +409,7 @@ async function getAllItems() {
 
 async function getMatches(url) {
   if (!await Storage.isVaultUnlocked()) {
-    return { success: true, items: [], count: 0 };
+    return { success: false, code: 'VAULT_LOCKED', error: 'Vault is locked', items: [], count: 0 };
   }
 
   const domain = DomainUtils.getBaseDomain(url);
@@ -448,6 +454,31 @@ async function decryptItem(id) {
 
   const decrypted = await CryptoClient.decryptItem(item.encrypted_data, item.encryption_iv, vaultKeyHex);
   return { success: true, item: decrypted };
+}
+
+/**
+ * Log a usage action to the server (non-blocking).
+ * SECURITY: Never logs plaintext credentials. Only item_id, action, client_type.
+ */
+async function logUsage(payload) {
+  if (!payload || !payload.item_id || !payload.action) {
+    return { success: false, error: 'Missing item_id or action' };
+  }
+  // Fire and forget — don't block autofill on logging
+  try {
+    if (isOnline) {
+      await ApiClient.request('vault/usage-log', {
+        body: {
+          item_id: payload.item_id,
+          action: payload.action,
+          client_type: payload.client_type || 'extension'
+        }
+      });
+    }
+  } catch (e) {
+    // Non-critical — don't fail on logging errors
+  }
+  return { success: true };
 }
 
 async function searchVault(query) {
