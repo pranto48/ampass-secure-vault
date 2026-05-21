@@ -286,4 +286,117 @@ class VaultApiController {
             echo json_encode(['error' => 'Import failed']);
         }
     }
+
+    /**
+     * POST /api/vault/importBulk - Bulk import encrypted vault items from password manager export.
+     * SECURITY: Only accepts pre-encrypted items. Plaintext parsing happens client-side.
+     * Never logs plaintext passwords.
+     */
+    public function importBulk(): void {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            http_response_code(405);
+            echo json_encode(['error' => 'Method not allowed']);
+            return;
+        }
+
+        CSRF::validateOrFail($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '');
+
+        $rawInput = file_get_contents('php://input');
+        if (strlen($rawInput) > 20 * 1024 * 1024) {
+            http_response_code(413);
+            echo json_encode(['error' => 'Request too large (max 20MB)']);
+            return;
+        }
+
+        $input = json_decode($rawInput, true);
+        if (!$input || !isset($input['items']) || !is_array($input['items'])) {
+            http_response_code(400);
+            echo json_encode(['error' => 'Invalid import data. Expected {items: [...], source: "..."}']);
+            return;
+        }
+
+        $items = $input['items'];
+        $source = $input['source'] ?? 'unknown';
+        $allowedSources = ['sticky_password', 'chrome', 'edge', 'brave', 'firefox', 'generic_csv', 'unknown'];
+        if (!in_array($source, $allowedSources, true)) $source = 'unknown';
+
+        // Limit batch size
+        if (count($items) > 1000) {
+            http_response_code(400);
+            echo json_encode(['error' => 'Maximum 1000 items per batch']);
+            return;
+        }
+
+        $allowedTypes = ['login', 'app_account', 'remote_desktop', 'secure_note', 'identity', 'payment_card', 'wifi', 'server_ssh', 'software_license', 'bank_account', 'custom'];
+
+        // Record import start
+        $importId = Database::insert(
+            "INSERT INTO import_history (user_id, source, item_count_total, status, created_at) VALUES (?, ?, ?, 'started', NOW())",
+            [$this->userId, $source, count($items)]
+        );
+
+        $imported = 0;
+        $skipped = 0;
+        $failed = 0;
+
+        Database::beginTransaction();
+        try {
+            foreach ($items as $item) {
+                if (empty($item['encrypted_data']) || empty($item['encryption_iv'])) {
+                    $skipped++;
+                    continue;
+                }
+
+                $itemType = $item['item_type'] ?? 'login';
+                if (!in_array($itemType, $allowedTypes, true)) $itemType = 'login';
+
+                try {
+                    VaultItem::create([
+                        'user_id' => $this->userId,
+                        'item_type' => $itemType,
+                        'encrypted_data' => $item['encrypted_data'],
+                        'encryption_iv' => $item['encryption_iv'],
+                        'title_hash' => $item['title_hash'] ?? null,
+                        'url_hash' => $item['url_hash'] ?? null,
+                        'host_hash' => $item['host_hash'] ?? null,
+                        'folder_id' => !empty($item['folder_id']) ? (int)$item['folder_id'] : null,
+                        'is_favorite' => 0,
+                        'password_strength' => $item['password_strength'] ?? null,
+                        'is_weak' => (int)($item['is_weak'] ?? 0),
+                        'is_reused' => 0
+                    ]);
+                    $imported++;
+                } catch (\Exception $e) {
+                    $failed++;
+                }
+            }
+
+            Database::commit();
+
+            // Update import history
+            Database::execute(
+                "UPDATE import_history SET status = 'completed', item_count_imported = ?, item_count_skipped = ?, item_count_failed = ?, completed_at = NOW() WHERE id = ?",
+                [$imported, $skipped, $failed, $importId]
+            );
+
+            AuditLog::log('bulk_import_completed', $this->userId, null, null, [
+                'source' => $source, 'imported' => $imported, 'skipped' => $skipped, 'failed' => $failed
+            ]);
+
+            echo json_encode([
+                'success' => true,
+                'import_id' => $importId,
+                'imported' => $imported,
+                'skipped' => $skipped,
+                'failed' => $failed,
+                'total' => count($items)
+            ]);
+
+        } catch (\Exception $e) {
+            Database::rollback();
+            Database::execute("UPDATE import_history SET status = 'failed' WHERE id = ?", [$importId]);
+            http_response_code(500);
+            echo json_encode(['error' => 'Bulk import failed', 'imported' => $imported]);
+        }
+    }
 }

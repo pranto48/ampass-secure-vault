@@ -47,6 +47,15 @@ class VaultController {
         require __DIR__ . '/../views/vault/form.php';
     }
 
+    public function import(): void {
+        $userId = Session::getUserId();
+        $folders = Folder::getAllByUser($userId);
+        $csrfToken = CSRF::generateToken();
+
+        $data = ['folders' => $folders, 'csrfToken' => $csrfToken];
+        require __DIR__ . '/../views/vault/import.php';
+    }
+
     public function edit(?string $id = null): void {
         $userId = Session::getUserId();
         $itemId = (int)($id ?? $_GET['id'] ?? 0);
