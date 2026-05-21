@@ -152,6 +152,7 @@ $redirectUri = htmlspecialchars(rtrim(APP_URL, '/')) . '/admin/backup-destinatio
                     <div class="form-group"><label class="form-label">Password</label><input type="password" name="password" class="form-input"></div>
                 </div>
                 <div class="form-group"><label class="form-label">Remote Directory</label><input type="text" name="remote_directory" class="form-input" value="/ampass-backups"></div>
+                <div class="form-group"><label class="form-label">SFTP Host Fingerprint</label><input type="text" name="host_fingerprint" class="form-input" placeholder="Required for SFTP: SHA1 or MD5 fingerprint"></div>
                 <label class="checkbox-label"><input type="checkbox" name="passive_mode" checked> Passive mode (FTP/FTPS)</label>
                 <button type="submit" class="btn btn-primary" style="margin-top:12px;">Add Destination</button>
             </form>

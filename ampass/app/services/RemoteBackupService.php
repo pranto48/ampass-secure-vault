@@ -222,6 +222,8 @@ class RemoteBackupService {
 
         $conn = @ssh2_connect($host, $port);
         if (!$conn) return ['success' => false, 'error' => 'Cannot connect to SFTP server'];
+        $fingerprintCheck = self::validateSftpFingerprint($conn, $config['host_fingerprint'] ?? '');
+        if (!$fingerprintCheck['success']) return $fingerprintCheck;
         if (!@ssh2_auth_password($conn, $user, $pass)) return ['success' => false, 'error' => 'SFTP authentication failed'];
 
         $sftp = @ssh2_sftp($conn);
@@ -247,8 +249,46 @@ class RemoteBackupService {
         if (!function_exists('ssh2_connect')) return ['success' => false, 'error' => 'PHP ssh2 extension not installed'];
         $conn = @ssh2_connect($config['host'] ?? '', (int)($config['port'] ?? 22));
         if (!$conn) return ['success' => false, 'error' => 'Cannot connect'];
+        $fingerprintCheck = self::validateSftpFingerprint($conn, $config['host_fingerprint'] ?? '');
+        if (!$fingerprintCheck['success']) return $fingerprintCheck;
         if (!@ssh2_auth_password($conn, $config['username'] ?? '', $config['password'] ?? '')) return ['success' => false, 'error' => 'Auth failed'];
-        return ['success' => true, 'message' => 'SFTP connection successful. Note: PHP ssh2 does not expose host key fingerprint verification. Verify server identity manually for production use.'];
+        return ['success' => true, 'message' => 'SFTP connection successful. Host fingerprint verified.'];
+    }
+
+    private static function normalizeFingerprint(string $fingerprint): string {
+        $fingerprint = strtolower(trim($fingerprint));
+        $fingerprint = preg_replace('/^(sha1|md5|fingerprint)\s*[:=]\s*/i', '', $fingerprint);
+        return preg_replace('/[^a-f0-9]/', '', $fingerprint);
+    }
+
+    private static function validateSftpFingerprint($connection, string $expected): array {
+        $expected = self::normalizeFingerprint($expected);
+        if ($expected === '') {
+            return ['success' => false, 'error' => 'SFTP host fingerprint is required. Test the server from a trusted machine and save its SHA1 or MD5 fingerprint before enabling SFTP backups.'];
+        }
+        if (!function_exists('ssh2_fingerprint')) {
+            return ['success' => false, 'error' => 'PHP ssh2_fingerprint is not available. Cannot verify SFTP host identity.'];
+        }
+
+        $actual = [];
+        if (defined('SSH2_FINGERPRINT_SHA1') && defined('SSH2_FINGERPRINT_HEX')) {
+            $fp = @ssh2_fingerprint($connection, SSH2_FINGERPRINT_SHA1 | SSH2_FINGERPRINT_HEX);
+            if ($fp) $actual[] = self::normalizeFingerprint($fp);
+        }
+        if (defined('SSH2_FINGERPRINT_MD5') && defined('SSH2_FINGERPRINT_HEX')) {
+            $fp = @ssh2_fingerprint($connection, SSH2_FINGERPRINT_MD5 | SSH2_FINGERPRINT_HEX);
+            if ($fp) $actual[] = self::normalizeFingerprint($fp);
+        }
+
+        $actual = array_values(array_filter(array_unique($actual)));
+        if (empty($actual)) {
+            return ['success' => false, 'error' => 'Could not read SFTP host fingerprint from server.'];
+        }
+        if (!in_array($expected, $actual, true)) {
+            return ['success' => false, 'error' => 'SFTP host fingerprint mismatch. Refusing connection because the server identity could not be verified.'];
+        }
+
+        return ['success' => true];
     }
 
     // ===== OneDrive =====

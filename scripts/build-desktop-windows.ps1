@@ -43,8 +43,8 @@ if (-not (Test-Path $distDir)) {
 $nsisDir = Join-Path $tauriDir "src-tauri\target\release\bundle\nsis"
 $msiDir = Join-Path $tauriDir "src-tauri\target\release\bundle\msi"
 
-$exeFile = Get-ChildItem $nsisDir -Filter "*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-$msiFile = Get-ChildItem $msiDir -Filter "*.msi" -ErrorAction SilentlyContinue | Select-Object -First 1
+$exeFile = Get-ChildItem $nsisDir -Filter "*.exe" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$msiFile = Get-ChildItem $msiDir -Filter "*.msi" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 
 # Copy to dist
 $checksums = @()

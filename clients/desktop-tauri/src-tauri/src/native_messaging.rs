@@ -15,9 +15,6 @@ use std::io::{self, Read, Write};
 /// Maximum message size (1MB - Chrome's limit)
 const MAX_MESSAGE_SIZE: u32 = 1024 * 1024;
 
-/// Message timeout in seconds
-const MESSAGE_TIMEOUT_SECS: u64 = 5;
-
 /// Allowed message types (strict allowlist)
 const ALLOWED_TYPES: &[&str] = &[
     "ping",

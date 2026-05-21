@@ -14,6 +14,10 @@ class BackupService {
     const MAGIC = 'AMPASS_BACKUP_V1';
     const HEADER_SIZE = 4096; // Fixed header block size
 
+    private static function appVersion(): string {
+        return defined('AMPASS_VERSION_SEMVER') ? AMPASS_VERSION_SEMVER : (defined('APP_VERSION') ? APP_VERSION : '1.0.0');
+    }
+
     /**
      * Create an encrypted backup
      */
@@ -26,7 +30,7 @@ class BackupService {
         $manifest = [
             'magic' => self::MAGIC,
             'version' => '1.0',
-            'app_version' => defined('APP_VERSION') ? APP_VERSION : '1.0.0',
+            'app_version' => self::appVersion(),
             'created_at' => date('c'),
             'includes_database' => $includeDb,
             'includes_files' => $includeFiles,
@@ -56,7 +60,7 @@ class BackupService {
         $header = json_encode([
             'magic' => self::MAGIC,
             'version' => '1.0',
-            'app_version' => defined('APP_VERSION') ? APP_VERSION : '1.0.0',
+            'app_version' => self::appVersion(),
             'created_at' => date('c'),
             'kdf' => $encrypted['kdf'],
             'kdf_params' => $encrypted['kdf_params'],

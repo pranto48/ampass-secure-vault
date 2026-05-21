@@ -53,6 +53,10 @@ $redirectUri = htmlspecialchars(rtrim(APP_URL, '/')) . '/admin/backup-destinatio
                     <div class="form-group"><label class="form-label">Password</label><input type="password" name="password" class="form-input" placeholder="<?= ($config['_has_password'] ?? false) ? 'Leave blank to keep existing' : 'Enter password' ?>"></div>
                 </div>
                 <div class="form-group"><label class="form-label">Remote Directory</label><input type="text" name="remote_directory" class="form-input" value="<?= htmlspecialchars($config['remote_directory'] ?? '/ampass-backups') ?>"></div>
+                <?php if ($provider === 'sftp'): ?>
+                <div class="form-group"><label class="form-label">SFTP Host Fingerprint</label><input type="text" name="host_fingerprint" class="form-input" value="<?= htmlspecialchars($config['host_fingerprint'] ?? '') ?>" placeholder="SHA1 or MD5 fingerprint from a trusted machine"></div>
+                <div class="alert alert-warning" style="margin-top:8px;">SFTP backups require a saved host fingerprint. Connections are refused if the server fingerprint changes.</div>
+                <?php endif; ?>
                 <label class="checkbox-label"><input type="checkbox" name="passive_mode" <?= ($config['passive_mode'] ?? true) ? 'checked' : '' ?>> Passive mode</label>
                 <?php endif; ?>
 

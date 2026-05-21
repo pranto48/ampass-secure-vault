@@ -186,16 +186,6 @@ pub fn delete_secure_config(key: &str) -> Result<(), String> {
     fs::write(&path, encrypted).map_err(|e| format!("Failed to write secure config: {}", e))
 }
 
-/// Clear all secure config (derivation params, trusted device data)
-pub fn clear_secure_config() -> Result<(), String> {
-    let dir = data_dir()?;
-    let path = dir.join("secure-config.enc");
-    if path.exists() {
-        fs::remove_file(&path).map_err(|e| format!("Failed to delete secure config: {}", e))?;
-    }
-    Ok(())
-}
-
 /// Encrypt data with AES-256-GCM
 /// Format: [12-byte nonce][ciphertext]
 fn encrypt_data(plaintext: &[u8], key: &[u8]) -> Result<Vec<u8>, String> {

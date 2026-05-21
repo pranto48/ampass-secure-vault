@@ -46,9 +46,11 @@ Requires PHP `ssh2` extension. Check with `php -m | grep ssh2`.
 
 1. Admin → Backup Destinations → Add New
 2. Select SFTP
-3. Enter: host, port (22), username, password, remote directory
+3. Enter: host, port (22), username, password, remote directory, and SFTP host fingerprint
 4. Click **Test Connection**
 5. Save
+
+**Host fingerprint:** SFTP uploads are refused unless the saved host fingerprint matches the server. Capture the SHA1 or MD5 fingerprint from a trusted machine during initial setup, save it in the destination, and retest after any server migration or key rotation.
 
 ### OneDrive
 

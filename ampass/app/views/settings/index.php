@@ -126,7 +126,7 @@ $error = Session::flash('error');
         </div>
         <div class="card-body">
             <div class="about-info">
-                <p><strong>AMPass</strong> v<?= APP_VERSION ?></p>
+                <p><strong>AMPass</strong> <?= htmlspecialchars(defined('AMPASS_VERSION_DISPLAY') ? AMPASS_VERSION_DISPLAY : ('v' . APP_VERSION)) ?></p>
                 <p>Secure Password Vault</p>
                 <p class="text-muted">Your vault data is encrypted end-to-end. The server never sees your plaintext passwords.</p>
             </div>

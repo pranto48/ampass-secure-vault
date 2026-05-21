@@ -160,7 +160,7 @@ class ExtensionApiController {
         echo json_encode([
             'success' => true,
             'api_version' => '1.0',
-            'app_version' => defined('APP_VERSION') ? APP_VERSION : '1.0.0',
+            'app_version' => defined('AMPASS_VERSION_SEMVER') ? AMPASS_VERSION_SEMVER : (defined('APP_VERSION') ? APP_VERSION : '1.0.0'),
             'authenticated' => $authenticated,
             'https' => Security::isHTTPS(),
             'server_time' => date('c')

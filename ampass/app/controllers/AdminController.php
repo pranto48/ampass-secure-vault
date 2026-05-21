@@ -904,6 +904,7 @@ class AdminController {
         $config['port'] = (int)($_POST['port'] ?? $config['port'] ?? 21);
         $config['username'] = trim($_POST['username'] ?? $config['username'] ?? '');
         $config['remote_directory'] = trim($_POST['remote_directory'] ?? $config['remote_directory'] ?? '/ampass-backups');
+        $config['host_fingerprint'] = trim($_POST['host_fingerprint'] ?? $config['host_fingerprint'] ?? '');
         $config['passive_mode'] = isset($_POST['passive_mode']);
         $config['folder_path'] = trim($_POST['folder_path'] ?? $config['folder_path'] ?? 'AMPass Backups');
         $config['client_id'] = trim($_POST['client_id'] ?? $config['client_id'] ?? '');
@@ -944,6 +945,7 @@ class AdminController {
             'username' => trim($_POST['username'] ?? ''),
             'password' => $_POST['password'] ?? '',
             'remote_directory' => trim($_POST['remote_directory'] ?? '/ampass-backups'),
+            'host_fingerprint' => trim($_POST['host_fingerprint'] ?? ''),
             'passive_mode' => isset($_POST['passive_mode']),
             'use_tls' => $provider === 'ftps',
             'client_id' => trim($_POST['client_id'] ?? ''),

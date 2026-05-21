@@ -202,7 +202,7 @@ class VaultApiController {
         $folders = Folder::getAllByUser($this->userId);
 
         $export = [
-            'version' => APP_VERSION,
+            'version' => defined('AMPASS_VERSION_SEMVER') ? AMPASS_VERSION_SEMVER : APP_VERSION,
             'exported_at' => date('c'),
             'items' => $items,
             'folders' => $folders

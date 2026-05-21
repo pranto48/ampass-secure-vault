@@ -14,6 +14,7 @@ mod backup;
 pub mod native_messaging;
 
 use std::sync::Mutex;
+use tauri::WindowEvent;
 /// Application state shared across commands
 pub struct AppState {
     pub vault_key: Mutex<Option<String>>,
@@ -71,6 +72,21 @@ async fn store_auth_token(token: String, state: tauri::State<'_, AppState>) -> R
 async fn get_auth_token(state: tauri::State<'_, AppState>) -> Result<Option<String>, String> {
     let token = state.auth_token.lock().map_err(|e| e.to_string())?.clone();
     Ok(token)
+}
+
+#[tauri::command]
+async fn store_derivation_params(params_json: String) -> Result<(), String> {
+    storage::save_secure_config("derivation_params", &params_json)
+}
+
+#[tauri::command]
+async fn load_derivation_params() -> Result<Option<String>, String> {
+    storage::load_secure_config("derivation_params")
+}
+
+#[tauri::command]
+async fn clear_derivation_params() -> Result<(), String> {
+    storage::delete_secure_config("derivation_params")
 }
 
 #[tauri::command]
@@ -135,6 +151,7 @@ async fn logout(state: tauri::State<'_, AppState>) -> Result<(), String> {
     *state.auth_token.lock().map_err(|e| e.to_string())? = None;
     *state.locked.lock().map_err(|e| e.to_string())? = true;
     let _ = keychain::delete_token();
+    let _ = storage::delete_secure_config("derivation_params");
     Ok(())
 }
 
@@ -490,6 +507,9 @@ pub fn run() {
             set_server_url,
             store_auth_token,
             get_auth_token,
+            store_derivation_params,
+            load_derivation_params,
+            clear_derivation_params,
             unlock_vault,
             lock_vault,
             is_vault_locked,
@@ -506,6 +526,12 @@ pub fn run() {
             backup::pick_backup_file,
             backup::pick_save_location,
         ])
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .setup(|app| {
             // Set up system tray
             tray::setup_tray(app)?;

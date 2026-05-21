@@ -11,11 +11,11 @@
  */
 
 define('AMPASS_VERSION_MAJOR', 1);
-define('AMPASS_COMMIT_COUNT', 63);
-define('AMPASS_VERSION_DISPLAY', 'V1.63');
-define('AMPASS_VERSION_SEMVER', '1.63.0');
-define('AMPASS_COMMIT_SHA', '144bdbcabb54b9176dbaeec2ba5d5802c7dfa7bc');
-define('AMPASS_VERSION_UPDATED_AT', '2026-05-20T12:32:27+02:00');
+define('AMPASS_COMMIT_COUNT', 65);
+define('AMPASS_VERSION_DISPLAY', 'V1.65');
+define('AMPASS_VERSION_SEMVER', '1.65.0');
+define('AMPASS_COMMIT_SHA', 'aaf980d671eca6b85d88aa8756a3148dc81d991f');
+define('AMPASS_VERSION_UPDATED_AT', '2026-05-21T05:39:59+02:00');
 
 // Map to legacy APP_VERSION constant if not already defined
 if (!defined('APP_VERSION')) {

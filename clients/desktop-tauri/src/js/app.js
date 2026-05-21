@@ -56,15 +56,25 @@
       if (!state.authenticated) { showAuth('viewLogin'); return; }
       Api.token = (await invoke('get_auth_token')) || '';
 
-      // If we have a token but no derivationParams, fetch them from server
+      // Prefer locally encrypted trusted-device params so restart goes straight to Unlock.
+      if (!derivationParams) {
+        const storedParams = await invoke('load_derivation_params');
+        if (storedParams) {
+          derivationParams = JSON.parse(storedParams);
+        }
+      }
+
+      // If the encrypted local params are missing, fetch once and store them.
       if (!derivationParams && Api.token) {
         try {
           const paramResult = await Api.request('derivationParams');
           if (paramResult.success && paramResult.params) {
             derivationParams = paramResult.params;
+            await invoke('store_derivation_params', { paramsJson: JSON.stringify(derivationParams) });
           }
         } catch (e) {
           // Token may be expired — redirect to login
+          await invoke('clear_derivation_params');
           showAuth('viewLogin');
           return;
         }
@@ -97,6 +107,7 @@
       Api.token = result.token;
       await invoke('store_auth_token', { token: result.token });
       derivationParams = result.derivation_params;
+      await invoke('store_derivation_params', { paramsJson: JSON.stringify(derivationParams) });
       document.getElementById('loginPass').value = '';
       showAuth('viewUnlock');
     } catch (e) {
@@ -143,6 +154,7 @@
     const encrypted = await Crypto.encrypt(vaultKeyRaw, wrappingKey);
     await Api.request('vault/init-key', { body: { encryption_salt: salt, encrypted_vault_key: encrypted.ciphertext, vault_key_iv: encrypted.iv, key_iterations: iterations } });
     derivationParams = { encryption_salt: salt, encrypted_vault_key: encrypted.ciphertext, vault_key_iv: encrypted.iv, key_iterations: iterations, needs_setup: false };
+    await invoke('store_derivation_params', { paramsJson: JSON.stringify(derivationParams) });
     vaultKeyHex = vaultKeyRaw;
   }
 
@@ -466,7 +478,7 @@
   document.getElementById('btnCopyGen').addEventListener('click', async () => { await navigator.clipboard.writeText(document.getElementById('genPw').value); toast('Copied!'); });
 
   // ===== Settings =====
-  document.getElementById('btnLogout').addEventListener('click', async () => { try { await Api.logout(); } catch {} await invoke('logout'); vaultKeyHex = null; searchKey = null; allDecrypted = []; derivationParams = null; Api.token = ''; showAuth('viewLogin'); });
+  document.getElementById('btnLogout').addEventListener('click', async () => { try { await Api.logout(); } catch {} await invoke('logout'); await invoke('clear_derivation_params'); vaultKeyHex = null; searchKey = null; allDecrypted = []; derivationParams = null; Api.token = ''; showAuth('viewLogin'); });
   document.getElementById('btnWipeCache').addEventListener('click', async () => { if (!confirm('Wipe all local data?')) return; await invoke('wipe_local_data'); vaultKeyHex = null; searchKey = null; allDecrypted = []; derivationParams = null; showAuth('viewWelcome'); });
   document.getElementById('btnExportBackup').addEventListener('click', async () => { const data = JSON.stringify({ version: '1.0', exported_at: new Date().toISOString(), items: vaultItems }); await invoke('pick_save_location', { data }); toast('Backup exported'); });
 
