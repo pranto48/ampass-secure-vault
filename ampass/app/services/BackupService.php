@@ -195,13 +195,16 @@ class BackupService {
 
     /**
      * Encrypt data with password-derived key
+     * SECURITY: Uses Argon2id + XChaCha20-Poly1305 (preferred) or PBKDF2 + AES-256-GCM (fallback)
      */
     private static function encrypt(string $plaintext, string $password): array {
-        $salt = random_bytes(32);
-        $nonce = random_bytes(24); // XChaCha20 nonce or 12 for AES-GCM
-
-        // Derive key
+        // Derive key using sodium (Argon2id + XChaCha20-Poly1305)
         if (function_exists('sodium_crypto_pwhash')) {
+            // SODIUM_CRYPTO_PWHASH_SALTBYTES = 16 bytes
+            $salt = random_bytes(SODIUM_CRYPTO_PWHASH_SALTBYTES);
+            // SODIUM_CRYPTO_AEAD_XCHACHA20POLY1305_IETF_NPUBBYTES = 24 bytes
+            $nonce = random_bytes(SODIUM_CRYPTO_AEAD_XCHACHA20POLY1305_IETF_NPUBBYTES);
+
             $key = sodium_crypto_pwhash(
                 32,
                 $password,
@@ -226,8 +229,9 @@ class BackupService {
         }
 
         // Fallback: PBKDF2 + AES-256-GCM
+        $salt = random_bytes(32);
+        $iv = random_bytes(12); // AES-GCM uses 12-byte IV
         $key = hash_pbkdf2('sha256', $password, $salt, 310000, 32, true);
-        $iv = substr($nonce, 0, 12);
         $ciphertext = openssl_encrypt($plaintext, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
 
         return [
@@ -247,7 +251,15 @@ class BackupService {
         $salt = hex2bin($header['salt']);
         $nonce = hex2bin($header['nonce']);
 
+        if (!$salt || !$nonce) {
+            throw new \Exception('Invalid salt or nonce in backup header');
+        }
+
         if ($header['kdf'] === 'argon2id' && function_exists('sodium_crypto_pwhash')) {
+            // Validate salt length for sodium
+            if (strlen($salt) !== SODIUM_CRYPTO_PWHASH_SALTBYTES) {
+                throw new \Exception('Invalid salt length for Argon2id (expected ' . SODIUM_CRYPTO_PWHASH_SALTBYTES . ' bytes, got ' . strlen($salt) . ')');
+            }
             $key = sodium_crypto_pwhash(
                 32, $password, $salt,
                 $header['kdf_params']['ops'] ?? SODIUM_CRYPTO_PWHASH_OPSLIMIT_MODERATE,

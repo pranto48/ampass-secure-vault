@@ -631,6 +631,135 @@ class UpdateService {
     }
 
     // ================================================================
+    // PREFLIGHT CHECKS
+    // ================================================================
+
+    /**
+     * Run preflight checks before one-click update.
+     * Returns array of check results with status: ok, warning, blocker.
+     */
+    public static function runPreflightChecks(): array {
+        $checks = [];
+        $appRoot = realpath(__DIR__ . '/../..');
+
+        // PHP version
+        $checks[] = ['name' => 'PHP Version', 'status' => version_compare(PHP_VERSION, '8.1', '>=') ? 'ok' : 'blocker', 'detail' => PHP_VERSION . (version_compare(PHP_VERSION, '8.1', '>=') ? '' : ' (requires 8.1+)')];
+
+        // Required extensions
+        $checks[] = ['name' => 'PDO MySQL', 'status' => extension_loaded('pdo_mysql') ? 'ok' : 'blocker', 'detail' => extension_loaded('pdo_mysql') ? 'Available' : 'Missing'];
+        $checks[] = ['name' => 'cURL', 'status' => function_exists('curl_init') ? 'ok' : 'blocker', 'detail' => function_exists('curl_init') ? 'Available' : 'Missing'];
+        $checks[] = ['name' => 'ZipArchive', 'status' => class_exists('ZipArchive') ? 'ok' : 'blocker', 'detail' => class_exists('ZipArchive') ? 'Available' : 'Missing'];
+        $checks[] = ['name' => 'OpenSSL', 'status' => extension_loaded('openssl') ? 'ok' : 'blocker', 'detail' => extension_loaded('openssl') ? 'Available' : 'Missing'];
+        $checks[] = ['name' => 'Sodium', 'status' => function_exists('sodium_crypto_pwhash') ? 'ok' : 'warning', 'detail' => function_exists('sodium_crypto_pwhash') ? 'Available' : 'Missing (AES fallback will be used for backups)'];
+
+        // Writable directories
+        $writableDirs = ['app', 'public', 'database/migrations', 'app_storage/backups', 'app_storage/temp'];
+        foreach ($writableDirs as $dir) {
+            $fullPath = $appRoot . '/' . $dir;
+            if (!is_dir($fullPath)) @mkdir($fullPath, 0755, true);
+            $writable = is_dir($fullPath) && is_writable($fullPath);
+            $checks[] = ['name' => $dir . '/ writable', 'status' => $writable ? 'ok' : 'blocker', 'detail' => $writable ? 'Writable' : 'Not writable — fix permissions'];
+        }
+
+        // Config exists
+        $configExists = file_exists($appRoot . '/config/config.php');
+        $checks[] = ['name' => 'config/config.php', 'status' => $configExists ? 'ok' : 'blocker', 'detail' => $configExists ? 'Exists' : 'Missing'];
+
+        // APP_SECRET
+        $checks[] = ['name' => 'APP_SECRET', 'status' => (defined('APP_SECRET') && strlen(APP_SECRET) >= 32) ? 'ok' : 'blocker', 'detail' => (defined('APP_SECRET') && strlen(APP_SECRET) >= 32) ? 'Defined (' . strlen(APP_SECRET) . ' chars)' : 'Missing or too short'];
+
+        // Disk space (estimate: need at least 50MB free)
+        $freeSpace = @disk_free_space($appRoot);
+        if ($freeSpace !== false) {
+            $freeMB = round($freeSpace / 1048576);
+            $checks[] = ['name' => 'Disk Space', 'status' => $freeMB > 50 ? 'ok' : ($freeMB > 20 ? 'warning' : 'blocker'), 'detail' => $freeMB . ' MB free'];
+        }
+
+        // HTTPS
+        $isHttps = Security::isHTTPS();
+        $isLocal = Security::isLocalhost();
+        $checks[] = ['name' => 'HTTPS', 'status' => ($isHttps || $isLocal) ? 'ok' : 'warning', 'detail' => $isHttps ? 'Active' : ($isLocal ? 'Localhost (OK for dev)' : 'Not active — recommended for production')];
+
+        return $checks;
+    }
+
+    /**
+     * Check if any preflight check is a blocker.
+     */
+    public static function hasPreflightBlockers(): bool {
+        $checks = self::runPreflightChecks();
+        foreach ($checks as $check) {
+            if ($check['status'] === 'blocker') return true;
+        }
+        return false;
+    }
+
+    /**
+     * Sync version info from GitHub API (no shell commands).
+     * For use after update to set installed commit count/SHA.
+     */
+    public static function syncVersionFromGitHub(): array {
+        $owner = self::getSetting('github_repo_owner', 'pranto48');
+        $repo = self::getSetting('github_repo_name', 'ampass-secure-vault');
+        $branch = self::getSetting('github_branch', 'main');
+        $token = self::getGitHubToken();
+
+        $result = ['success' => false];
+
+        try {
+            // Get commit count via GitHub API pagination trick
+            $url = "https://api.github.com/repos/{$owner}/{$repo}/commits?sha={$branch}&per_page=1";
+            $headers = ['User-Agent: ' . self::USER_AGENT, 'Accept: application/vnd.github.v3+json'];
+            if ($token) $headers[] = 'Authorization: token ' . $token;
+
+            $ch = curl_init($url);
+            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => $headers, CURLOPT_TIMEOUT => 15, CURLOPT_HEADER => true]);
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $headerSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+            curl_close($ch);
+
+            if ($httpCode !== 200) {
+                $result['error'] = "GitHub API returned HTTP {$httpCode}";
+                return $result;
+            }
+
+            $headerStr = substr($response, 0, $headerSize);
+            $body = substr($response, $headerSize);
+            $commits = json_decode($body, true);
+            $sha = $commits[0]['sha'] ?? '';
+
+            // Parse commit count from Link header
+            $commitCount = 1;
+            if (preg_match('/page=(\d+)>;\s*rel="last"/', $headerStr, $matches)) {
+                $commitCount = (int)$matches[1];
+            }
+
+            // Save version info
+            $display = "V1.{$commitCount}";
+            $semver = "1.{$commitCount}.0";
+
+            self::saveSetting('installed_commit_count', (string)$commitCount);
+            self::saveSetting('installed_commit_sha', $sha);
+            self::saveSetting('installed_version', $semver);
+            self::saveSetting('installed_version_display', $display);
+            self::saveSetting('installed_version_semver', $semver);
+            self::saveSetting('latest_commit_count', (string)$commitCount);
+            self::saveSetting('latest_commit_sha', $sha);
+            self::saveSetting('latest_version', $semver);
+            self::saveSetting('latest_version_display', $display);
+            self::saveSetting('latest_version_semver', $semver);
+            self::saveSetting('update_available', '0');
+
+            $result = ['success' => true, 'commit_count' => $commitCount, 'sha' => $sha, 'display' => $display, 'semver' => $semver];
+        } catch (\Exception $e) {
+            $result['error'] = $e->getMessage();
+        }
+
+        return $result;
+    }
+
+    // ================================================================
     // HELPERS
     // ================================================================
 

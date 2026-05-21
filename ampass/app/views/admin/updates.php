@@ -62,22 +62,37 @@ $sourceLabel = $sourceType === 'github_branch_zip' ? 'Branch ZIP' : 'GitHub Rele
     </div>
 
     <?php if ($data['update_available']): ?>
-    <!-- Apply Update -->
-    <div class="card">
-        <div class="card-header"><h2 class="card-title">Apply Update</h2></div>
+    <!-- One-Click Update (cPanel friendly) -->
+    <div class="card" style="border:1px solid #6366f1;">
+        <div class="card-header"><h2 class="card-title">&#9889; One-Click Update</h2></div>
         <div class="card-body">
-            <div class="alert alert-warning">&#9888; An encrypted backup will be created before updating. Do not close this page during update.</div>
-            <?php if (!empty($data['download_url'])): ?>
-            <p class="text-muted" style="font-size:0.8rem;margin-bottom:12px;">Download: <?= htmlspecialchars(substr($data['download_url'], 0, 100)) ?></p>
-            <?php endif; ?>
-            <form method="POST" action="<?= APP_URL ?>/admin/updates/apply">
+            <p style="color:#a1a1aa;margin-bottom:12px;">Downloads latest AMPass code from GitHub as ZIP. No SSH or Git required. Works on cPanel shared hosting. An encrypted backup is created automatically before updating.</p>
+            <form method="POST" action="<?= APP_URL ?>/admin/updates/one-click">
                 <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
-                <div class="form-group"><label class="form-label">Backup Password (for pre-update backup)</label><input type="password" name="backup_password" class="form-input" required minlength="8"></div>
-                <div class="form-group"><label class="form-label">Type <code>UPDATE AMPASS</code> to confirm</label><input type="text" name="confirmation" class="form-input" required pattern="UPDATE AMPASS" placeholder="UPDATE AMPASS"></div>
-                <button type="submit" class="btn btn-primary">Update Now</button>
+                <div class="form-group"><label class="form-label">Backup Password</label><input type="password" name="backup_password" class="form-input" minlength="8" placeholder="Enter backup password (min 8 chars)"></div>
+                <button type="submit" class="btn btn-primary" style="font-size:1rem;padding:12px 24px;" onclick="this.textContent='Updating... please wait';this.disabled=true;this.form.submit();">&#9889; One-Click Update AMPass</button>
             </form>
+            <p class="text-muted" style="font-size:0.72rem;margin-top:8px;">Do not close this page during update. Rollback happens automatically if update fails.</p>
         </div>
     </div>
+
+    <!-- Advanced: Manual Apply -->
+    <details style="margin-bottom:16px;">
+        <summary style="cursor:pointer;color:#a1a1aa;font-size:0.85rem;">Advanced: Manual Update with Confirmation</summary>
+        <div class="card" style="margin-top:8px;">
+            <div class="card-body">
+                <?php if (!empty($data['download_url'])): ?>
+                <p class="text-muted" style="font-size:0.8rem;margin-bottom:12px;">Download: <?= htmlspecialchars(substr($data['download_url'], 0, 100)) ?></p>
+                <?php endif; ?>
+                <form method="POST" action="<?= APP_URL ?>/admin/updates/apply">
+                    <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
+                    <div class="form-group"><label class="form-label">Backup Password</label><input type="password" name="backup_password" class="form-input" required minlength="8"></div>
+                    <div class="form-group"><label class="form-label">Type <code>UPDATE AMPASS</code> to confirm</label><input type="text" name="confirmation" class="form-input" required pattern="UPDATE AMPASS" placeholder="UPDATE AMPASS"></div>
+                    <button type="submit" class="btn btn-secondary">Manual Update</button>
+                </form>
+            </div>
+        </div>
+    </details>
     <?php endif; ?>
 
     <!-- Update Settings -->
@@ -112,6 +127,24 @@ $sourceLabel = $sourceType === 'github_branch_zip' ? 'Branch ZIP' : 'GitHub Rele
             </form>
         </div>
     </div>
+
+    <!-- Preflight Checks -->
+    <?php if (!empty($data['preflight_checks'])): ?>
+    <div class="card">
+        <div class="card-header"><h2 class="card-title">Preflight Checks</h2></div>
+        <div class="card-body">
+            <div style="display:grid;gap:4px;font-size:0.82rem;">
+            <?php foreach ($data['preflight_checks'] as $check): ?>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <span><?= $check['status'] === 'ok' ? '&#10003;' : ($check['status'] === 'warning' ? '&#9888;' : '&#10007;') ?></span>
+                    <span style="color:<?= $check['status'] === 'ok' ? '#16a34a' : ($check['status'] === 'warning' ? '#d97706' : '#dc2626') ?>;"><?= htmlspecialchars($check['name']) ?></span>
+                    <span style="color:#64748b;"><?= htmlspecialchars($check['detail']) ?></span>
+                </div>
+            <?php endforeach; ?>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
 
     <!-- Pending Migrations -->
     <?php if (!empty($data['pending_migrations'])): ?>

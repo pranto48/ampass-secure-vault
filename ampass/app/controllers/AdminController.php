@@ -671,6 +671,8 @@ class AdminController {
             case 'migrations': $this->updatesRunMigrations(); return;
             case 'settings': $this->updatesSaveSettings(); return;
             case 'mark-installed': $this->updatesMarkInstalled(); return;
+            case 'one-click': $this->updatesOneClick(); return;
+            case 'preflight': $this->updatesPreflight(); return;
         }
 
         $data = [
@@ -683,11 +685,12 @@ class AdminController {
             'commit_message' => UpdateService::getSetting('latest_commit_message', ''),
             'download_url' => UpdateService::getSetting('latest_download_url', ''),
             'check_error' => UpdateService::getSetting('last_check_error', ''),
-            'source_type' => UpdateService::getSetting('update_source_type', 'github_release'),
+            'source_type' => UpdateService::getSetting('update_source_type', 'github_branch_zip'),
             'github_repo_owner' => UpdateService::getSetting('github_repo_owner', 'pranto48'),
             'github_repo_name' => UpdateService::getSetting('github_repo_name', 'ampass-secure-vault'),
             'github_branch' => UpdateService::getSetting('github_branch', 'main'),
             'github_token_set' => !empty(UpdateService::getSetting('github_token_encrypted', '')),
+            'preflight_checks' => UpdateService::runPreflightChecks(),
             'history' => UpdateService::getUpdateHistory(10),
             'pending_migrations' => UpdateService::getPendingMigrations(),
             'csrfToken' => CSRF::generateToken()
@@ -814,6 +817,111 @@ class AdminController {
             Session::flash('success', 'Current code marked as installed (commit ' . substr($latestSha, 0, 8) . ').');
         } else {
             Session::flash('error', 'No latest commit SHA available. Run "Check for Updates" first.');
+        }
+        header('Location: ' . APP_URL . '/admin/updates');
+        exit;
+    }
+
+    /**
+     * One-Click Update — full automated update for cPanel/shared hosting.
+     * No SSH, no git, no composer required.
+     */
+    private function updatesOneClick(): void {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . APP_URL . '/admin/updates'); exit; }
+        CSRF::validateOrRedirect(APP_URL . '/admin/updates');
+
+        // Preflight check
+        if (UpdateService::hasPreflightBlockers()) {
+            Session::flash('error', 'One-click update blocked: preflight checks failed. Fix issues shown below.');
+            header('Location: ' . APP_URL . '/admin/updates');
+            exit;
+        }
+
+        // Get backup password
+        $backupPassword = $_POST['backup_password'] ?? '';
+        if (strlen($backupPassword) < 8) {
+            // Try stored backup password
+            $storedEncrypted = UpdateService::getSetting('update_backup_password_encrypted', '');
+            if (!empty($storedEncrypted) && defined('APP_SECRET')) {
+                $key = hash('sha256', APP_SECRET, true);
+                $data = base64_decode($storedEncrypted);
+                if (strlen($data) >= 28) {
+                    $iv = substr($data, 0, 12);
+                    $tag = substr($data, 12, 16);
+                    $ct = substr($data, 28);
+                    $decrypted = openssl_decrypt($ct, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
+                    if ($decrypted && strlen($decrypted) >= 8) {
+                        $backupPassword = $decrypted;
+                    }
+                }
+            }
+            if (strlen($backupPassword) < 8) {
+                Session::flash('error', 'Backup password required (minimum 8 characters). Enter it below or store one in settings.');
+                header('Location: ' . APP_URL . '/admin/updates');
+                exit;
+            }
+        }
+
+        // Check for updates first
+        $checkResult = UpdateService::checkForUpdates();
+        if (!empty($checkResult['error'])) {
+            Session::flash('error', 'Update check failed: ' . $checkResult['error']);
+            header('Location: ' . APP_URL . '/admin/updates');
+            exit;
+        }
+        if (!$checkResult['update_available']) {
+            Session::flash('success', 'AMPass is already up to date.');
+            header('Location: ' . APP_URL . '/admin/updates');
+            exit;
+        }
+
+        // Apply update
+        AuditLog::log('one_click_update_started', Session::getUserId());
+        $result = UpdateService::applyUpdate($backupPassword, Session::getUserId());
+
+        if ($result['success']) {
+            // Sync version from GitHub API (no shell commands)
+            $versionSync = UpdateService::syncVersionFromGitHub();
+
+            $msg = 'One-click update completed! ';
+            if (!empty($versionSync['display'])) {
+                $msg .= $versionSync['display'];
+            } else {
+                $msg .= 'v' . ($result['version'] ?? '?');
+            }
+            $msg .= ' — ' . ($result['files_updated'] ?? 0) . ' files updated.';
+
+            AuditLog::log('one_click_update_completed', Session::getUserId(), null, null, [
+                'version' => $versionSync['display'] ?? $result['version'] ?? '',
+                'files' => $result['files_updated'] ?? 0
+            ]);
+            Session::flash('success', $msg);
+        } else {
+            AuditLog::log('one_click_update_failed', Session::getUserId(), null, null, ['error' => substr($result['error'] ?? '', 0, 200)]);
+            Session::flash('error', 'One-click update failed: ' . ($result['error'] ?? 'Unknown error'));
+        }
+
+        header('Location: ' . APP_URL . '/admin/updates');
+        exit;
+    }
+
+    /**
+     * Show preflight check results (AJAX-friendly).
+     */
+    private function updatesPreflight(): void {
+        $checks = UpdateService::runPreflightChecks();
+        if (CSRF::isAjaxRequest()) {
+            header('Content-Type: application/json');
+            echo json_encode(['success' => true, 'checks' => $checks]);
+            exit;
+        }
+        // For non-AJAX, just redirect with flash
+        $blockers = array_filter($checks, fn($c) => $c['status'] === 'blocker');
+        if (empty($blockers)) {
+            Session::flash('success', 'All preflight checks passed (' . count($checks) . ' checks).');
+        } else {
+            $msg = count($blockers) . ' blocker(s): ' . implode(', ', array_map(fn($c) => $c['name'], $blockers));
+            Session::flash('error', $msg);
         }
         header('Location: ' . APP_URL . '/admin/updates');
         exit;
