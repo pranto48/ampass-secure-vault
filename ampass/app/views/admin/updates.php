@@ -53,10 +53,10 @@ $sourceLabel = $sourceType === 'github_branch_zip' ? 'Branch ZIP' : 'GitHub Rele
                 </form>
                 <form method="POST" action="<?= APP_URL ?>/admin/updates/sync-version" style="display:inline;">
                     <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
-                    <button type="submit" class="btn btn-ghost btn-sm">Sync Version</button>
+                    <button type="submit" class="btn btn-ghost btn-sm" title="Reads latest GitHub version info without marking as installed">Check Latest Version</button>
                 </form>
                 <?php if (!empty($data['latest_sha'])): ?>
-                <form method="POST" action="<?= APP_URL ?>/admin/updates/mark-installed" style="display:inline;" onsubmit="return confirm('Mark current code as installed? Use after manual git pull.')">
+                <form method="POST" action="<?= APP_URL ?>/admin/updates/mark-installed" style="display:inline;" onsubmit="return confirm('Mark current code as installed? Use only after manual upload or successful update.')">
                     <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
                     <button type="submit" class="btn btn-ghost btn-sm">Mark as Installed</button>
                 </form>
@@ -66,17 +66,18 @@ $sourceLabel = $sourceType === 'github_branch_zip' ? 'Branch ZIP' : 'GitHub Rele
     </div>
 
     <!-- One-Click Update (cPanel friendly) — always visible -->
+    <?php $hasBlockers = !empty(array_filter($data['preflight_checks'] ?? [], fn($c) => $c['status'] === 'blocker')); ?>
     <div class="card" style="border:1px solid #6366f1;">
         <div class="card-header"><h2 class="card-title">&#9889; cPanel One-Click Update</h2></div>
         <div class="card-body">
-            <p style="color:#a1a1aa;margin-bottom:12px;">Downloads latest AMPass code from GitHub as ZIP. No SSH or Git required. Works on cPanel shared hosting. An encrypted backup is created automatically before updating.</p>
-            <?php if (!$data['update_available']): ?>
-            <p class="text-muted" style="margin-bottom:8px;">No update detected. Click "Check GitHub" above first.</p>
+            <p style="color:#a1a1aa;margin-bottom:12px;">Downloads latest AMPass code from GitHub as ZIP. No SSH or Git required. Works on cPanel shared hosting. Checks GitHub, creates backup, updates files, runs migrations.</p>
+            <?php if ($hasBlockers): ?>
+            <p style="color:var(--danger);margin-bottom:8px;">&#10007; Preflight blockers detected. Fix issues below before updating.</p>
             <?php endif; ?>
             <form method="POST" action="<?= APP_URL ?>/admin/updates/one-click">
                 <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
                 <div class="form-group"><label class="form-label">Backup Password</label><input type="password" name="backup_password" class="form-input" minlength="8" placeholder="Enter backup password (min 8 chars)"></div>
-                <button type="submit" class="btn btn-primary" style="font-size:1rem;padding:12px 24px;" <?= !$data['update_available'] ? 'disabled' : '' ?> onclick="if(!this.disabled){this.textContent='Updating... please wait';this.disabled=true;this.form.submit();}">&#9889; One-Click Update AMPass</button>
+                <button type="submit" class="btn btn-primary" style="font-size:1rem;padding:12px 24px;" <?= $hasBlockers ? 'disabled' : '' ?> onclick="if(!this.disabled){this.textContent='Updating... please wait';this.disabled=true;this.form.submit();}">&#9889; One-Click Update AMPass</button>
             </form>
             <p class="text-muted" style="font-size:0.72rem;margin-top:8px;">Do not close this page during update. Rollback happens automatically if update fails.</p>
         </div>

@@ -810,14 +810,12 @@ class AdminController {
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . APP_URL . '/admin/updates'); exit; }
         CSRF::validateOrRedirect(APP_URL . '/admin/updates');
 
-        $latestSha = UpdateService::getSetting('latest_commit_sha', '');
-        if (!empty($latestSha)) {
-            UpdateService::saveSetting('installed_commit_sha', $latestSha);
-            UpdateService::saveSetting('update_available', '0');
-            AuditLog::log('update_marked_installed', Session::getUserId(), null, null, ['sha' => substr($latestSha, 0, 8)]);
-            Session::flash('success', 'Current code marked as installed (commit ' . substr($latestSha, 0, 8) . ').');
+        $result = UpdateService::markCurrentCodeAsInstalledFromGitHub();
+        if ($result['success']) {
+            AuditLog::log('update_marked_installed', Session::getUserId(), null, null, ['sha' => substr($result['sha'] ?? '', 0, 8)]);
+            Session::flash('success', 'Current code marked as installed: ' . ($result['display'] ?? '') . ' (commit ' . substr($result['sha'] ?? '', 0, 8) . ').');
         } else {
-            Session::flash('error', 'No latest commit SHA available. Run "Check for Updates" first.');
+            Session::flash('error', $result['error'] ?? 'Cannot mark as installed.');
         }
         header('Location: ' . APP_URL . '/admin/updates');
         exit;
@@ -932,11 +930,17 @@ class AdminController {
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ' . APP_URL . '/admin/updates'); exit; }
         CSRF::validateOrRedirect(APP_URL . '/admin/updates');
 
-        $result = UpdateService::syncVersionFromGitHub();
+        $result = UpdateService::syncLatestVersionFromGitHub();
         if ($result['success']) {
-            Session::flash('success', 'Version synced: ' . ($result['display'] ?? '') . ' (commit ' . substr($result['sha'] ?? '', 0, 8) . ', #' . ($result['commit_count'] ?? '') . ')');
+            $msg = 'Latest GitHub version: ' . ($result['display'] ?? '') . ' (commit ' . substr($result['sha'] ?? '', 0, 8) . ')';
+            if (!empty($result['update_available'])) {
+                $msg .= ' — Update available!';
+            } else {
+                $msg .= ' — Up to date.';
+            }
+            Session::flash('success', $msg);
         } else {
-            Session::flash('error', 'Version sync failed: ' . ($result['error'] ?? 'Unknown error'));
+            Session::flash('error', 'Version check failed: ' . ($result['error'] ?? 'Unknown error'));
         }
         header('Location: ' . APP_URL . '/admin/updates');
         exit;

@@ -695,10 +695,11 @@ class UpdateService {
     }
 
     /**
-     * Sync version info from GitHub API (no shell commands).
-     * For use after update to set installed commit count/SHA.
+     * Fetch latest version info from GitHub API (no shell commands).
+     * Only updates latest_* settings. Does NOT mark code as installed.
+     * Safe to call anytime — just reads what's on GitHub.
      */
-    public static function syncVersionFromGitHub(): array {
+    public static function syncLatestVersionFromGitHub(): array {
         $owner = self::getSetting('github_repo_owner', 'pranto48');
         $repo = self::getSetting('github_repo_name', 'ampass-secure-vault');
         $branch = self::getSetting('github_branch', 'main');
@@ -728,6 +729,7 @@ class UpdateService {
             $body = substr($response, $headerSize);
             $commits = json_decode($body, true);
             $sha = $commits[0]['sha'] ?? '';
+            $commitMessage = substr($commits[0]['commit']['message'] ?? '', 0, 200);
 
             // Parse commit count from Link header
             $commitCount = 1;
@@ -735,28 +737,64 @@ class UpdateService {
                 $commitCount = (int)$matches[1];
             }
 
-            // Save version info
             $display = "V1.{$commitCount}";
             $semver = "1.{$commitCount}.0";
 
-            self::saveSetting('installed_commit_count', (string)$commitCount);
-            self::saveSetting('installed_commit_sha', $sha);
-            self::saveSetting('installed_version', $semver);
-            self::saveSetting('installed_version_display', $display);
-            self::saveSetting('installed_version_semver', $semver);
+            // Only update latest_* settings — never installed_*
             self::saveSetting('latest_commit_count', (string)$commitCount);
             self::saveSetting('latest_commit_sha', $sha);
             self::saveSetting('latest_version', $semver);
             self::saveSetting('latest_version_display', $display);
             self::saveSetting('latest_version_semver', $semver);
-            self::saveSetting('update_available', '0');
+            self::saveSetting('latest_commit_message', $commitMessage);
+            self::saveSetting('last_update_check_at', date('c'));
 
-            $result = ['success' => true, 'commit_count' => $commitCount, 'sha' => $sha, 'display' => $display, 'semver' => $semver];
+            // Determine if update is available by comparing with installed SHA
+            $installedSha = self::getSetting('installed_commit_sha', '');
+            $updateAvailable = !empty($sha) && (empty($installedSha) || $sha !== $installedSha);
+            self::saveSetting('update_available', $updateAvailable ? '1' : '0');
+
+            $result = ['success' => true, 'commit_count' => $commitCount, 'sha' => $sha, 'display' => $display, 'semver' => $semver, 'update_available' => $updateAvailable];
         } catch (\Exception $e) {
             $result['error'] = $e->getMessage();
         }
 
         return $result;
+    }
+
+    /**
+     * Mark the current code as the latest installed version from GitHub.
+     * Call ONLY after successful one-click update or manual "Mark as Installed".
+     * Updates installed_* settings and sets update_available = 0.
+     */
+    public static function markCurrentCodeAsInstalledFromGitHub(): array {
+        $latestSha = self::getSetting('latest_commit_sha', '');
+        $latestCount = self::getSetting('latest_commit_count', '');
+        $latestDisplay = self::getSetting('latest_version_display', '');
+        $latestSemver = self::getSetting('latest_version_semver', '');
+
+        if (empty($latestSha)) {
+            return ['success' => false, 'error' => 'No latest commit SHA available. Run Check GitHub first.'];
+        }
+
+        self::saveSetting('installed_commit_count', $latestCount);
+        self::saveSetting('installed_commit_sha', $latestSha);
+        self::saveSetting('installed_version', $latestSemver ?: $latestDisplay);
+        self::saveSetting('installed_version_display', $latestDisplay);
+        self::saveSetting('installed_version_semver', $latestSemver);
+        self::saveSetting('update_available', '0');
+
+        return ['success' => true, 'sha' => $latestSha, 'display' => $latestDisplay];
+    }
+
+    /**
+     * Legacy wrapper — calls syncLatestVersionFromGitHub then markCurrentCodeAsInstalledFromGitHub.
+     * Used by one-click update after successful file copy.
+     */
+    public static function syncVersionFromGitHub(): array {
+        $latest = self::syncLatestVersionFromGitHub();
+        if (!$latest['success']) return $latest;
+        return self::markCurrentCodeAsInstalledFromGitHub();
     }
 
     // ================================================================
