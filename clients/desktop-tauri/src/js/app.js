@@ -212,8 +212,8 @@
   });
 
   // ===== Unlock =====
-  // Show trusted PC info on unlock screen
-  (async function showUnlockInfo() {
+  // Refresh trusted PC info on unlock screen
+  async function refreshUnlockInfo() {
     try {
       const userJson = await invoke('load_user_summary');
       const state = await invoke('get_app_state');
@@ -227,9 +227,11 @@
       if (state.server_url) {
         try { parts.push('Server: ' + new URL(state.server_url).host); } catch { parts.push('Server: ' + state.server_url); }
       }
-      if (parts.length > 0) infoEl.textContent = parts.join(' • ');
+      if (parts.length > 0) infoEl.textContent = parts.join(' \u2022 ');
     } catch {}
-  })();
+  }
+  // Show info on initial load
+  refreshUnlockInfo();
 
   document.getElementById('btnUnlock').addEventListener('click', async () => {
     const pass = document.getElementById('unlockPass').value;
@@ -609,8 +611,21 @@
   document.getElementById('btnExportBackup').addEventListener('click', async () => { const data = JSON.stringify({ version: '1.0', exported_at: new Date().toISOString(), items: vaultItems }); await invoke('pick_save_location', { data }); toast('Backup exported'); });
 
   // ===== Tauri Events =====
-  listen('tray-lock', async () => { vaultKeyHex = null; searchKey = null; allDecrypted = []; await invoke('lock_vault'); showAuth('viewUnlock'); });
-  listen('auto-locked', () => { vaultKeyHex = null; searchKey = null; allDecrypted = []; showAuth('viewUnlock'); });
+  listen('tray-lock', async () => { vaultKeyHex = null; searchKey = null; allDecrypted = []; await invoke('lock_vault'); await refreshUnlockInfo(); showAuth('viewUnlock'); });
+  listen('auto-locked', () => { vaultKeyHex = null; searchKey = null; allDecrypted = []; refreshUnlockInfo(); showAuth('viewUnlock'); });
+  listen('show-unlock-from-browser', (event) => {
+    // Browser extension requested unlock via native messaging
+    if (vaultKeyHex) {
+      // Already unlocked — just show main window
+      showAuth('viewMain');
+    } else {
+      // Locked — show unlock screen
+      refreshUnlockInfo();
+      showAuth('viewUnlock');
+      // Focus the password input
+      setTimeout(() => document.getElementById('unlockPass')?.focus(), 100);
+    }
+  });
 
   // ===== Helpers =====
   function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }

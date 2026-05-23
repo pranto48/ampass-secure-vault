@@ -433,7 +433,7 @@
         chrome.runtime.sendMessage({ type: 'OPEN_DESKTOP_UNLOCK', payload: { pageHost: window.location.hostname } }).then(response => {
           if (response && response.success) {
             removeAmpassDropdown();
-            showAmpassToast('Opening AMPass Desktop...', 'info');
+            showAmpassToast('AMPass Desktop opened. Unlock, then click the field icon again.', 'info');
           } else {
             // Desktop bridge not available — show fallback
             removeAmpassDropdown();

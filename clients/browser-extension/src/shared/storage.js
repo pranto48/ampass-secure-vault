@@ -86,7 +86,7 @@ const Storage = {
       autofillBehavior: 'click',
       autosaveBehavior: 'ask',
       clipboardClearSeconds: 30,
-      lockTimeoutMinutes: 15,
+      lockTimeoutMinutes: 30,
       theme: 'system',
       allowHttpAutofill: false,
       useDesktopBridge: false,

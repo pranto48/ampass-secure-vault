@@ -15,6 +15,8 @@ use std::io::{self, Read, Write};
 /// Maximum message size (1MB - Chrome's limit)
 const MAX_MESSAGE_SIZE: u32 = 1024 * 1024;
 
+const _MESSAGE_TIMEOUT_SECS: u64 = 5;
+
 /// Allowed message types (strict allowlist)
 const ALLOWED_TYPES: &[&str] = &[
     "ping",
@@ -128,6 +130,41 @@ pub fn write_response(response: &NativeResponse) -> Result<(), String> {
     Ok(())
 }
 
+/// Write a signal file that the running Tauri app can detect.
+/// The Tauri app polls this file to know when to show the unlock window.
+/// SECURITY: Signal file contains only action/reason/host — never secrets.
+fn write_unlock_signal(reason: &str, page_host: &str) -> bool {
+    let signal_dir = dirs::data_dir()
+        .map(|d| d.join("ampass"))
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let _ = std::fs::create_dir_all(&signal_dir);
+    let signal_path = signal_dir.join("unlock_signal.json");
+    let content = serde_json::json!({
+        "action": "show_unlock",
+        "reason": reason,
+        "page_host": page_host,
+        "timestamp": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+    });
+    std::fs::write(&signal_path, content.to_string()).is_ok()
+}
+
+/// Read and clear the unlock signal file (called by Tauri app).
+pub fn read_and_clear_unlock_signal() -> Option<serde_json::Value> {
+    let signal_dir = dirs::data_dir()
+        .map(|d| d.join("ampass"))
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let signal_path = signal_dir.join("unlock_signal.json");
+    if !signal_path.exists() {
+        return None;
+    }
+    let content = std::fs::read_to_string(&signal_path).ok()?;
+    let _ = std::fs::remove_file(&signal_path);
+    serde_json::from_str(&content).ok()
+}
+
 /// Process a single native message and return a response
 /// SECURITY: This function must never return plaintext secrets if vault is locked.
 pub fn process_message(
@@ -140,7 +177,7 @@ pub fn process_message(
     match msg.msg_type.as_str() {
         "ping" => {
             NativeResponse::ok("pong", serde_json::json!({
-                "version": "1.0.0",
+                "version": env!("CARGO_PKG_VERSION"),
                 "app": "AMPass Desktop"
             }), rid)
         }
@@ -148,7 +185,7 @@ pub fn process_message(
         "get_status" => {
             NativeResponse::ok("status", serde_json::json!({
                 "vault_locked": vault_locked,
-                "version": "1.0.0"
+                "version": env!("CARGO_PKG_VERSION")
             }), rid)
         }
 
@@ -173,12 +210,30 @@ pub fn process_message(
 
         "open_unlock_window" => {
             // Request to show/focus the desktop app unlock window.
-            // The actual window show/focus is handled by the caller via the returned action.
+            // Writes a signal file that the running Tauri app watches.
+            // If no instance is running, launches the GUI executable.
             // SECURITY: Does not unlock vault — just opens the UI for user to enter master password.
             let reason = msg.payload.get("reason").and_then(|v| v.as_str()).unwrap_or("browser_request");
             let page_host = msg.payload.get("page_url_host").and_then(|v| v.as_str()).unwrap_or("");
+
+            // Write IPC signal file for running instance to detect
+            let signal_written = write_unlock_signal(reason, page_host);
+
+            // Also try to launch/focus the app via OS-level window activation
+            #[cfg(target_os = "windows")]
+            {
+                // Try to find and focus existing AMPass window
+                use std::process::Command;
+                // Use PowerShell to find and activate the window
+                let _ = Command::new("powershell")
+                    .args(["-NoProfile", "-Command",
+                        "(Get-Process -Name 'AMPass' -ErrorAction SilentlyContinue | Select-Object -First 1).MainWindowHandle | ForEach-Object { if ($_ -ne 0) { Add-Type '[DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr hWnd); [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);' -Name Win32 -Namespace API; [API.Win32]::ShowWindow($_, 9); [API.Win32]::SetForegroundWindow($_) } }"])
+                    .spawn();
+            }
+
             NativeResponse::ok("open_unlock_window", serde_json::json!({
                 "action": "show_unlock",
+                "signal_written": signal_written,
                 "vault_locked": vault_locked,
                 "reason": reason,
                 "page_host": page_host
@@ -187,6 +242,17 @@ pub fn process_message(
 
         "focus_main_window" => {
             // Request to focus/show the main desktop window
+            let _ = write_unlock_signal("focus", "");
+
+            #[cfg(target_os = "windows")]
+            {
+                use std::process::Command;
+                let _ = Command::new("powershell")
+                    .args(["-NoProfile", "-Command",
+                        "(Get-Process -Name 'AMPass' -ErrorAction SilentlyContinue | Select-Object -First 1).MainWindowHandle | ForEach-Object { if ($_ -ne 0) { Add-Type '[DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr hWnd); [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);' -Name Win32 -Namespace API; [API.Win32]::ShowWindow($_, 9); [API.Win32]::SetForegroundWindow($_) } }"])
+                    .spawn();
+            }
+
             NativeResponse::ok("focus_main_window", serde_json::json!({
                 "action": "focus_window",
                 "vault_locked": vault_locked
