@@ -1,8 +1,8 @@
 {
     "manifest_version": 3,
     "name": "AMPass Password Manager",
-    "version": "1.65.0",
-    "version_name": "V1.65",
+    "version": "1.72.0",
+    "version_name": "V1.72",
     "description": "Secure password manager with zero-knowledge encryption. Autofill, autosave, and generate strong passwords.",
     "permissions": [
         "storage",

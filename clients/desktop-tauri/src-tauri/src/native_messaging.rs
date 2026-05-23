@@ -218,22 +218,56 @@ pub fn process_message(
 
             // Write IPC signal file for running instance to detect
             let signal_written = write_unlock_signal(reason, page_host);
+            let mut launched = false;
 
-            // Also try to launch/focus the app via OS-level window activation
             #[cfg(target_os = "windows")]
             {
-                // Try to find and focus existing AMPass window
                 use std::process::Command;
-                // Use PowerShell to find and activate the window
-                let _ = Command::new("powershell")
+                // Check if AMPass process exists and try to focus it
+                let check = Command::new("powershell")
                     .args(["-NoProfile", "-Command",
-                        "(Get-Process -Name 'AMPass' -ErrorAction SilentlyContinue | Select-Object -First 1).MainWindowHandle | ForEach-Object { if ($_ -ne 0) { Add-Type '[DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr hWnd); [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);' -Name Win32 -Namespace API; [API.Win32]::ShowWindow($_, 9); [API.Win32]::SetForegroundWindow($_) } }"])
-                    .spawn();
+                        "(Get-Process -Name 'AMPass','ampass-desktop' -ErrorAction SilentlyContinue | Measure-Object).Count"])
+                    .output();
+
+                let process_running = check.map(|o| {
+                    String::from_utf8_lossy(&o.stdout).trim().parse::<u32>().unwrap_or(0) > 0
+                }).unwrap_or(false);
+
+                if process_running {
+                    // Focus existing window
+                    let _ = Command::new("powershell")
+                        .args(["-NoProfile", "-Command",
+                            "(Get-Process -Name 'AMPass','ampass-desktop' -ErrorAction SilentlyContinue | Select-Object -First 1).MainWindowHandle | ForEach-Object { if ($_ -ne 0) { Add-Type '[DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr hWnd); [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);' -Name Win32 -Namespace API; [API.Win32]::ShowWindow($_, 9); [API.Win32]::SetForegroundWindow($_) } }"])
+                        .spawn();
+                } else {
+                    // Launch the GUI app with --show-unlock flag
+                    // SECURITY: Use current_exe parent dir to find the GUI exe safely
+                    if let Ok(exe_path) = std::env::current_exe() {
+                        // The native host exe is the same as the GUI exe
+                        let _ = Command::new(&exe_path)
+                            .arg("--show-unlock")
+                            .spawn();
+                        launched = true;
+                    }
+                }
+            }
+
+            #[cfg(not(target_os = "windows"))]
+            {
+                // On Linux/macOS, try to launch the app
+                if let Ok(exe_path) = std::env::current_exe() {
+                    use std::process::Command;
+                    let _ = Command::new(&exe_path)
+                        .arg("--show-unlock")
+                        .spawn();
+                    launched = true;
+                }
             }
 
             NativeResponse::ok("open_unlock_window", serde_json::json!({
                 "action": "show_unlock",
                 "signal_written": signal_written,
+                "launched": launched,
                 "vault_locked": vault_locked,
                 "reason": reason,
                 "page_host": page_host

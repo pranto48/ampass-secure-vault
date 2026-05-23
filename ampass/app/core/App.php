@@ -107,9 +107,12 @@ class App {
             $className = ucfirst($resource) . 'ApiController';
             $controller = new $className();
             
+            // Convert hyphenated action to camelCase method name (e.g., import-bulk → importBulk)
+            $methodName = lcfirst(str_replace('-', '', ucwords($action, '-')));
+            
             // SECURITY: Only allow explicitly defined public methods (not magic/internal methods)
-            if (method_exists($controller, $action) && !str_starts_with($action, '__') && (new ReflectionMethod($controller, $action))->isPublic()) {
-                $controller->$action($param);
+            if (method_exists($controller, $methodName) && !str_starts_with($methodName, '__') && (new ReflectionMethod($controller, $methodName))->isPublic()) {
+                $controller->$methodName($param);
             } else {
                 http_response_code(404);
                 echo json_encode(['error' => 'Endpoint not found']);

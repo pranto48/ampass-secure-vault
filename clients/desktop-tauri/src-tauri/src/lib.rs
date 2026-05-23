@@ -14,7 +14,7 @@ mod backup;
 pub mod native_messaging;
 
 use std::sync::Mutex;
-use tauri::WindowEvent;
+use tauri::{Emitter, Manager, WindowEvent};
 /// Application state shared across commands
 pub struct AppState {
     pub vault_key: Mutex<Option<String>>,
@@ -520,6 +520,9 @@ async fn list_installed_apps() -> Result<Vec<serde_json::Value>, String> {
 }
 
 pub fn run() {
+    // Check for --show-unlock argument (launched by native messaging host)
+    let show_unlock = std::env::args().any(|a| a == "--show-unlock");
+
     let app_state = AppState::default();
     
     // Try to restore server URL from config
@@ -574,12 +577,25 @@ pub fn run() {
                 let _ = window.hide();
             }
         })
-        .setup(|app| {
+        .setup(move |app| {
             // Set up system tray
             tray::setup_tray(app)?;
             
             // Set up idle lock checker
             lock::setup_lock_checker(app.handle().clone());
+
+            // If launched with --show-unlock, emit event to frontend after window is ready
+            if show_unlock {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    if let Some(window) = handle.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                        let _ = window.emit("show-unlock-from-browser", serde_json::json!({"reason": "launched_by_native_host"}));
+                    }
+                });
+            }
             
             Ok(())
         })
