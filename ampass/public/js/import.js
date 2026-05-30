@@ -59,21 +59,41 @@
     if (!els.acknowledge.checked) return;
     const file = els.file.files[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target.result;
-      try {
-        if (selectedSource === 'sticky_password') {
-          parsedItems = parseStickyPasswordTxt(text);
-        } else {
-          parsedItems = parseBrowserCsv(text, selectedSource);
+
+    // Detect encoding by reading first 4 bytes
+    const checkReader = new FileReader();
+    checkReader.onload = (e) => {
+      const arr = new Uint8Array(e.target.result);
+      let encoding = 'utf-8';
+      
+      if (arr.length >= 2) {
+        if (arr[0] === 0xff && arr[1] === 0xfe) {
+          encoding = 'utf-16le';
+        } else if (arr[0] === 0xfe && arr[1] === 0xff) {
+          encoding = 'utf-16be';
+        } else if (arr.length >= 3 && arr[0] === 0xef && arr[1] === 0xbb && arr[2] === 0xbf) {
+          encoding = 'utf-8';
         }
-        showPreview();
-      } catch (err) {
-        alert('Parse error: ' + err.message);
       }
+
+      // Read entire file with detected encoding
+      const textReader = new FileReader();
+      textReader.onload = (evt) => {
+        const text = evt.target.result;
+        try {
+          if (selectedSource === 'sticky_password') {
+            parsedItems = parseStickyPasswordTxt(text);
+          } else {
+            parsedItems = parseBrowserCsv(text, selectedSource);
+          }
+          showPreview();
+        } catch (err) {
+          alert('Parse error: ' + err.message);
+        }
+      };
+      textReader.readAsText(file, encoding);
     };
-    reader.readAsText(file, 'UTF-8');
+    checkReader.readAsArrayBuffer(file.slice(0, 4));
   });
 
   els.btnSelectAll.addEventListener('click', () => { parsedItems.forEach(i => i._selected = true); renderPreview(); });
@@ -84,41 +104,52 @@
 
   // ===== Sticky Password TXT Parser =====
   function parseStickyPasswordTxt(text) {
+    // Remove UTF-8 BOM if present in decoded string
+    if (text.charCodeAt(0) === 0xFEFF) {
+      text = text.substring(1);
+    }
+
     const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
     const items = [];
     let current = null;
     let currentLogin = null;
 
     for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
+      const line = lines[i].trim();
+      if (!line) continue;
 
-      if (line.startsWith('Account name:')) {
+      const colonIdx = line.indexOf(':');
+      if (colonIdx === -1) continue;
+
+      const key = line.substring(0, colonIdx).trim().toLowerCase();
+      let rawVal = line.substring(colonIdx + 1);
+      if (rawVal.startsWith(' ')) {
+        rawVal = rawVal.substring(1);
+      }
+      const val = rawVal.trim();
+
+      if (key === 'account name' || key === 'account' || key === 'title' || key === 'site') {
         // Save previous credential if exists
         if (currentLogin && current) {
           items.push(buildStickyItem(current, currentLogin));
           currentLogin = null;
         }
-        current = { accountName: line.substring(13).trim(), link: '', description: '', logins: [] };
+        current = { accountName: val, link: '', description: '', logins: [] };
         currentLogin = null;
-      } else if (line.startsWith('Link:') && current) {
-        current.link = line.substring(5).trim();
-      } else if (line.startsWith('Description:') && current) {
-        current.description = line.substring(12).trim();
-      } else if (line.startsWith('Logins:') && current) {
-        // Just metadata, ignore count
-      } else if (line.startsWith('Login:') && current) {
+      } else if ((key === 'link' || key === 'url' || key === 'website' || key === 'web') && current) {
+        current.link = val;
+      } else if ((key === 'description' || key === 'notes' || key === 'note' || key === 'comment') && current) {
+        current.description = val;
+      } else if ((key === 'login' || key === 'username' || key === 'user' || key === 'user name' || key === 'email') && current) {
         // Save previous login if password was missing
         if (currentLogin) {
           currentLogin.warnings = currentLogin.warnings || [];
           if (!currentLogin.password) currentLogin.warnings.push('Missing password');
           items.push(buildStickyItem(current, currentLogin));
         }
-        currentLogin = { username: line.substring(6).trim(), password: '', warnings: [] };
-      } else if (line.startsWith('Password:') && current && currentLogin) {
-        // Keep everything after "Password:" — only strip one optional leading space
-        let raw = line.substring('Password:'.length);
-        if (raw.startsWith(' ')) raw = raw.substring(1);
-        currentLogin.password = raw;
+        currentLogin = { username: val, password: '', warnings: [] };
+      } else if ((key === 'password' || key === 'pass' || key === 'pwd') && current && currentLogin) {
+        currentLogin.password = rawVal; // Preserve trailing spaces in password
         items.push(buildStickyItem(current, currentLogin));
         currentLogin = null;
       }
@@ -135,7 +166,15 @@
   function buildStickyItem(account, login) {
     let title = account.accountName || '';
     if (!title && account.link) {
-      try { title = new URL(account.link).hostname; } catch { title = account.link; }
+      try {
+        let cleanUrl = account.link;
+        if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+          cleanUrl = 'https://' + cleanUrl;
+        }
+        title = new URL(cleanUrl).hostname;
+      } catch {
+        title = account.link;
+      }
     }
     if (!title) title = 'Imported Login';
 
@@ -393,7 +432,20 @@
   }
 
   function extractDomain(url) {
-    try { return new URL(url).hostname; } catch { return url; }
+    if (!url) return '';
+    let host = url;
+    try {
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        url = 'https://' + url;
+      }
+      host = new URL(url).hostname;
+    } catch {
+      // Keep as is
+    }
+    if (host.startsWith('www.')) {
+      host = host.substring(4);
+    }
+    return host.toLowerCase().trim();
   }
 
   function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
