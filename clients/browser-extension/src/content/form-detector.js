@@ -543,4 +543,39 @@
     childList: true,
     subtree: true
   });
+
+  // ===== SPA Navigation Cleanup =====
+  // When a SPA navigates (pushState / replaceState / popstate), stale autofill
+  // icons from the previous "page" linger because the DOM isn't fully replaced.
+  // We clean them up and re-run detection after a short debounce.
+
+  function cleanupAmpassIcons() {
+    document.querySelectorAll('.ampass-field-icon').forEach(el => el.remove());
+    removeAmpassDropdown();
+    detectedForms = [];
+    // Remove the data attribute so detectForms() will re-process fields
+    document.querySelectorAll('[data-ampass-detected]').forEach(el => {
+      el.removeAttribute('data-ampass-detected');
+      el.removeAttribute('data-ampass-icon-added');
+    });
+  }
+
+  let spaDebounceTimer = null;
+  function onSpaNavigate() {
+    if (spaDebounceTimer) clearTimeout(spaDebounceTimer);
+    spaDebounceTimer = setTimeout(() => {
+      cleanupAmpassIcons();
+      setTimeout(detectForms, 400);
+    }, 200);
+  }
+
+  window.addEventListener('popstate', onSpaNavigate);
+
+  // Intercept pushState / replaceState (History API — used by React Router, Next.js, etc.)
+  (function() {
+    const _push = history.pushState.bind(history);
+    const _replace = history.replaceState.bind(history);
+    history.pushState = function(...args) { _push(...args); onSpaNavigate(); };
+    history.replaceState = function(...args) { _replace(...args); onSpaNavigate(); };
+  })();
 })();

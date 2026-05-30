@@ -1,9 +1,10 @@
 {
     "manifest_version": 3,
-    "name": "AMPass Password Manager",
+    "name": "__MSG_appName__",
+    "default_locale": "en",
     "version": "1.72.0",
     "version_name": "V1.72",
-    "description": "Secure password manager with zero-knowledge encryption. Autofill, autosave, and generate strong passwords.",
+    "description": "__MSG_appDescription__",
     "permissions": [
         "storage",
         "activeTab",
@@ -54,6 +55,12 @@
                 "default": "Ctrl+Shift+L"
             },
             "description": "Open AMPass popup"
+        },
+        "autofill_current": {
+            "suggested_key": {
+                "default": "Ctrl+Shift+F"
+            },
+            "description": "Autofill login on current page"
         }
     },
     "content_security_policy": {

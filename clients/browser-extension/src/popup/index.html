@@ -15,6 +15,10 @@
         <span class="brand-name">AMPass</span>
       </div>
       <div class="header-actions">
+        <div id="bridgeIndicator" class="bridge-indicator" style="display:none;" title="Connected to AMPass Desktop">🖥️</div>
+        <button id="btnBack" class="icon-btn" title="Back" style="display:none;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+        </button>
         <button id="btnSettings" class="icon-btn" title="Settings">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15 1.65 1.65 0 003.17 14H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68 1.65 1.65 0 0010 3.17V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
         </button>
@@ -26,9 +30,16 @@
 
     <!-- Status Bar -->
     <div id="statusBar" class="status-bar" style="display:none;"></div>
-    <div id="bridgeIndicator" class="bridge-indicator" style="display:none;" title="Connected to AMPass Desktop">🖥️</div>
 
     <!-- Views -->
+
+    <!-- Loading -->
+    <div id="viewLoading" class="view view-center" style="display:none;">
+      <div class="spinner"></div>
+      <p class="text-muted" style="margin-top:10px;">Loading...</p>
+    </div>
+
+    <!-- Setup -->
     <div id="viewSetup" class="view" style="display:none;">
       <div class="view-center">
         <p class="text-muted">Connect to your AMPass server</p>
@@ -37,6 +48,7 @@
       </div>
     </div>
 
+    <!-- Login -->
     <div id="viewLogin" class="view" style="display:none;">
       <div class="view-center">
         <p class="text-muted">Sign in to your vault</p>
@@ -49,6 +61,7 @@
       </div>
     </div>
 
+    <!-- Unlock -->
     <div id="viewUnlock" class="view" style="display:none;">
       <div class="view-center">
         <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="1.5" style="margin:0 auto 12px;display:block;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
@@ -64,6 +77,7 @@
       </div>
     </div>
 
+    <!-- Vault List -->
     <div id="viewVault" class="view" style="display:none;">
       <!-- Search -->
       <div class="search-bar">
@@ -90,20 +104,136 @@
 
       <!-- Empty state -->
       <div id="emptyState" class="empty-state" style="display:none;">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin:0 auto 8px;display:block;opacity:0.3;"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
         <p>No items in your vault yet.</p>
+        <p style="font-size:11px;margin-top:4px;">Click + Add Login to create your first entry.</p>
       </div>
 
       <!-- Actions -->
       <div class="bottom-actions">
         <button id="btnAddNew" class="btn btn-secondary btn-sm">+ Add Login</button>
+        <button id="btnAddNote" class="btn btn-secondary btn-sm">+ Note</button>
         <button id="btnGenerate" class="btn btn-secondary btn-sm">Generate</button>
       </div>
+    </div>
+
+    <!-- Item Detail View -->
+    <div id="viewDetail" class="view" style="display:none;">
+      <div class="detail-header">
+        <div class="detail-icon" id="detailIcon">🔑</div>
+        <div class="detail-title-group">
+          <span id="detailTitle" class="detail-title"></span>
+          <span id="detailUrl" class="detail-url text-muted"></span>
+        </div>
+        <button id="btnDetailFav" class="icon-btn fav-btn" title="Favorite">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        </button>
+      </div>
+
+      <div class="detail-fields">
+        <!-- Username -->
+        <div class="detail-field" id="detailUsernameRow">
+          <span class="detail-field-label">Username</span>
+          <div class="detail-field-value-row">
+            <span id="detailUsername" class="detail-field-value"></span>
+            <button class="icon-btn detail-copy-btn" id="btnCopyUsername" title="Copy username">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Password -->
+        <div class="detail-field" id="detailPasswordRow">
+          <span class="detail-field-label">Password</span>
+          <div class="detail-field-value-row">
+            <span id="detailPassword" class="detail-field-value mono password-dots">••••••••</span>
+            <button class="icon-btn detail-copy-btn" id="btnTogglePass" title="Show/Hide password">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+            <button class="icon-btn detail-copy-btn" id="btnCopyPassword" title="Copy password">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            </button>
+          </div>
+          <div class="detail-strength-bar"><div id="detailStrengthFill" class="strength-fill"></div></div>
+        </div>
+
+        <!-- TOTP -->
+        <div class="detail-field" id="detailTotpRow" style="display:none;">
+          <span class="detail-field-label">2FA Code</span>
+          <div class="detail-field-value-row">
+            <span id="detailTotpCode" class="detail-field-value mono totp-code">------</span>
+            <div id="totpCountdown" class="totp-countdown">30</div>
+            <button class="icon-btn detail-copy-btn" id="btnCopyTotp" title="Copy 2FA code">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Notes -->
+        <div class="detail-field" id="detailNotesRow" style="display:none;">
+          <span class="detail-field-label">Notes</span>
+          <p id="detailNotes" class="detail-notes"></p>
+        </div>
+      </div>
+
+      <div class="detail-actions">
+        <button id="btnDetailAutofill" class="btn btn-primary btn-sm">⚡ Autofill</button>
+        <button id="btnDetailEdit" class="btn btn-secondary btn-sm">Edit</button>
+        <button id="btnDetailDelete" class="btn btn-danger btn-sm">Delete</button>
+      </div>
+    </div>
+
+    <!-- Add / Edit Form -->
+    <div id="viewEdit" class="view" style="display:none;">
+      <div class="edit-form-title" id="editFormTitle">Add Login</div>
+      <input type="hidden" id="editItemId">
+      <input type="hidden" id="editItemType" value="login">
+
+      <div class="form-group">
+        <label class="form-label">Title</label>
+        <input type="text" id="editTitle" class="input" placeholder="e.g. GitHub, Netflix">
+      </div>
+      <div class="form-group" id="editUrlGroup">
+        <label class="form-label">Website URL</label>
+        <input type="url" id="editUrl" class="input" placeholder="https://example.com">
+      </div>
+      <div class="form-group" id="editUsernameGroup">
+        <label class="form-label">Username / Email</label>
+        <input type="text" id="editUsername" class="input" placeholder="you@example.com" autocomplete="off">
+      </div>
+      <div class="form-group" id="editPasswordGroup">
+        <label class="form-label">Password</label>
+        <div class="pw-input-row">
+          <input type="password" id="editPassword" class="input" placeholder="Password" autocomplete="new-password">
+          <button id="btnToggleEditPass" class="icon-btn" title="Show/hide">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+          <button id="btnFillGenerate" class="icon-btn" title="Generate password">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </button>
+        </div>
+        <div class="strength-bar" style="margin-top:5px;"><div id="editStrengthFill" class="strength-fill"></div></div>
+      </div>
+      <div class="form-group" id="editTotpGroup">
+        <label class="form-label">2FA Secret (optional)</label>
+        <input type="text" id="editTotp" class="input mono" placeholder="JBSWY3DPEHPK3PXP" autocomplete="off" spellcheck="false">
+        <span class="form-hint">Base32 key from the site's 2FA setup</span>
+      </div>
+      <div class="form-group" id="editNotesGroup">
+        <label class="form-label">Notes (optional)</label>
+        <textarea id="editNotes" class="input edit-notes" rows="2" placeholder="Any extra info..."></textarea>
+      </div>
+
+      <div class="edit-actions">
+        <button id="btnSaveItem" class="btn btn-primary btn-sm" style="flex:1;">Save</button>
+        <button id="btnCancelEdit" class="btn btn-secondary btn-sm">Cancel</button>
+      </div>
+      <div id="editError" class="error-msg" style="display:none;margin-top:8px;"></div>
     </div>
 
     <!-- Generator Panel -->
     <div id="viewGenerator" class="view" style="display:none;">
       <div class="section-header">
-        <button id="btnBackFromGen" class="icon-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg></button>
         <span class="section-title">Password Generator</span>
       </div>
       <div class="gen-output">
@@ -119,11 +249,14 @@
         <label class="check-label"><input type="checkbox" id="genNumbers" checked> Numbers</label>
         <label class="check-label"><input type="checkbox" id="genSymbols" checked> Symbols</label>
       </div>
-      <button id="btnRegenerate" class="btn btn-primary btn-full">Regenerate</button>
+      <div style="display:flex;gap:6px;">
+        <button id="btnRegenerate" class="btn btn-primary" style="flex:1;">Regenerate</button>
+        <button id="btnUsePwInEdit" class="btn btn-secondary btn-sm" style="display:none;" title="Use this password">Use</button>
+      </div>
     </div>
   </div>
 
-  <div id="versionFooter" class="version-footer"></div>
+  <div id="versionFooter"></div>
 
   <script src="../shared/storage.js"></script>
   <script src="../shared/security.js"></script>

@@ -62,6 +62,10 @@ async function handleMessage(msg, sender) {
       return await saveItem(msg.payload);
     case 'UPDATE_ITEM':
       return await updateItem(msg.payload);
+    case 'DELETE_ITEM':
+      return await deleteItem(msg.payload.id);
+    case 'FAVORITE_ITEM':
+      return await favoriteItem(msg.payload.id, msg.payload.isFavorite);
     case 'CAPTURE_SAVE_CANDIDATE':
       return captureSaveCandidate(msg.payload, sender);
     case 'CHECK_PENDING_SAVE':
@@ -70,8 +74,12 @@ async function handleMessage(msg, sender) {
       return clearPendingSaveCandidate(sender);
     case 'GENERATE_PASSWORD':
       return { success: true, password: CryptoClient.generatePassword(msg.payload || {}) };
+    case 'GENERATE_TOTP':
+      return await generateTotp(msg.payload.secret);
     case 'COPY_TO_CLIPBOARD':
-      return await copyToClipboard(msg.payload);
+      // Clipboard is handled directly by popup context (has navigator.clipboard access).
+      // Service worker cannot write to clipboard in MV3 — return text for caller to use.
+      return { success: true, text: msg.payload.text };
     case 'GET_SETTINGS':
       return { success: true, settings: await Storage.getSettings() };
     case 'RESET_EXTENSION':
@@ -80,7 +88,6 @@ async function handleMessage(msg, sender) {
       return await logUsage(msg.payload);
     case 'OPEN_POPUP':
       // Chrome doesn't allow programmatic popup opening from content scripts.
-      // Return a message telling the user to click the icon.
       return { success: false, error: 'Click the AMPass extension icon to open.' };
     case 'OPEN_DESKTOP_UNLOCK':
       return await openDesktopUnlock(msg.payload || {});
@@ -576,11 +583,104 @@ async function updateItem(payload) {
   return { success: true, id: result.id };
 }
 
-async function copyToClipboard(payload) {
-  // Use offscreen document or fallback
-  // In MV3, clipboard access from service worker is limited
-  // We'll handle this in the popup/content script instead
-  return { success: true, text: payload.text };
+async function deleteItem(id) {
+  if (!await Storage.isVaultUnlocked()) throw new Error('Vault is locked');
+  if (!isOnline) return { success: false, code: 'OFFLINE_READ_ONLY', error: 'Server offline. Offline mode is read-only.' };
+
+  await ApiClient.deleteVaultItem(id);
+  // Remove from local cache immediately
+  if (cachedVaultItems) {
+    cachedVaultItems = cachedVaultItems.filter(i => i.id !== id);
+    await Storage.setSession('vaultItems', cachedVaultItems);
+    await Storage.setEncryptedVaultCache(cachedVaultItems);
+  }
+  return { success: true };
+}
+
+async function favoriteItem(id, isFavorite) {
+  if (!await Storage.isVaultUnlocked()) throw new Error('Vault is locked');
+  if (!isOnline) return { success: false, code: 'OFFLINE_READ_ONLY', error: 'Server offline. Offline mode is read-only.' };
+
+  await ApiClient.request('vault/favorite', { body: { id, is_favorite: isFavorite ? 1 : 0 } });
+  // Update local cache
+  if (cachedVaultItems) {
+    const item = cachedVaultItems.find(i => i.id === id);
+    if (item) item.is_favorite = isFavorite ? 1 : 0;
+    await Storage.setSession('vaultItems', cachedVaultItems);
+    await Storage.setEncryptedVaultCache(cachedVaultItems);
+  }
+  return { success: true };
+}
+
+/**
+ * Generate a TOTP code (RFC 6238) using Web Crypto.
+ * SECURITY: secret is base32-encoded and never stored in plaintext
+ * outside of the encrypted vault item.
+ */
+async function generateTotp(secret) {
+  if (!secret) return { success: false, error: 'No TOTP secret provided' };
+  try {
+    const code = await computeTotp(secret);
+    const remaining = 30 - (Math.floor(Date.now() / 1000) % 30);
+    return { success: true, code, remaining };
+  } catch (e) {
+    return { success: false, error: 'Invalid TOTP secret: ' + (e.message || 'unknown') };
+  }
+}
+
+/**
+ * TOTP implementation (RFC 6238 / RFC 4226) using Web Crypto HMAC-SHA1.
+ * No external libraries required.
+ */
+async function computeTotp(base32Secret) {
+  // Decode base32 secret
+  const bytes = base32Decode(base32Secret.toUpperCase().replace(/\s/g, ''));
+
+  // Get current 30-second time step
+  const timeStep = Math.floor(Date.now() / 1000 / 30);
+
+  // Build 8-byte big-endian counter
+  const counter = new ArrayBuffer(8);
+  const view = new DataView(counter);
+  // JavaScript numbers are safe for the high 32 bits for many years
+  view.setUint32(0, Math.floor(timeStep / 0x100000000), false);
+  view.setUint32(4, timeStep >>> 0, false);
+
+  // HMAC-SHA1
+  const key = await crypto.subtle.importKey(
+    'raw', bytes, { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']
+  );
+  const hmac = new Uint8Array(await crypto.subtle.sign('HMAC', key, counter));
+
+  // Dynamic truncation
+  const offset = hmac[19] & 0xf;
+  const code = (
+    ((hmac[offset] & 0x7f) << 24) |
+    ((hmac[offset + 1] & 0xff) << 16) |
+    ((hmac[offset + 2] & 0xff) << 8) |
+    (hmac[offset + 3] & 0xff)
+  ) % 1000000;
+
+  return String(code).padStart(6, '0');
+}
+
+/** Base32 decoder for TOTP secrets. */
+function base32Decode(encoded) {
+  const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = 0, value = 0;
+  const bytes = [];
+  for (const char of encoded) {
+    if (char === '=') break;
+    const idx = CHARS.indexOf(char);
+    if (idx === -1) throw new Error('Invalid base32 character: ' + char);
+    value = (value << 5) | idx;
+    bits += 5;
+    if (bits >= 8) {
+      bytes.push((value >>> (bits - 8)) & 0xff);
+      bits -= 8;
+    }
+  }
+  return new Uint8Array(bytes).buffer;
 }
 
 // ===== Badge =====
@@ -615,7 +715,36 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   }
 });
 
-// ===== Reset lock timer on activity =====
+// ===== Keyboard Command: Direct Autofill (Ctrl+Shift+F) =====
+chrome.commands.onCommand.addListener(async (command) => {
+  if (command !== 'autofill_current') return;
+
+  // Must be unlocked
+  if (!await Storage.isVaultUnlocked()) return;
+
+  // Get active tab
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab || !tab.url || !tab.url.startsWith('http')) return;
+
+  // Find matches for the current tab's URL
+  const result = await getMatches(tab.url);
+  if (!result.success || result.count === 0) return;
+
+  // Pick the first match and decrypt
+  const match = result.items[0];
+  const vaultKeyHex = await Storage.getVaultKey();
+  const encItem = (cachedVaultItems || []).find(i => i.id === match.id);
+  if (!encItem) return;
+
+  const decrypted = await CryptoClient.decryptItem(encItem.encrypted_data, encItem.encryption_iv, vaultKeyHex);
+
+  // Send to content script for autofill
+  chrome.tabs.sendMessage(tab.id, {
+    type: 'AUTOFILL',
+    payload: { username: decrypted.username || decrypted.email || '', password: decrypted.password || '' }
+  }).catch(() => {});
+});
+
 chrome.runtime.onMessage.addListener(() => {
   // Any message resets the auto-lock timer
   Storage.getSettings().then(settings => {
