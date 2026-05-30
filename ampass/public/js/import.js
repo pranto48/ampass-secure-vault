@@ -338,6 +338,13 @@
     const selected = parsedItems.filter(i => i._selected && i.password);
     if (selected.length === 0) { alert('No items selected for import.'); return; }
 
+    // Verify vault is unlocked
+    if (typeof AMPassCrypto === 'undefined' || !AMPassCrypto.isUnlocked()) {
+      alert('Import failed: Vault is locked or decryption key is not available. Please ensure your vault is unlocked.');
+      els.btnImport.disabled = false;
+      return;
+    }
+
     els.btnImport.disabled = true;
     els.progress.style.display = '';
 
@@ -347,6 +354,7 @@
       let totalImported = 0;
       let totalSkipped = 0;
       let totalFailed = 0;
+      let serverErrors = [];
 
       for (let i = 0; i < selected.length; i += batchSize) {
         const batch = selected.slice(i, i + batchSize);
@@ -397,8 +405,14 @@
             totalImported += result.imported || 0;
             totalSkipped += result.skipped || 0;
             totalFailed += result.failed || 0;
+            if (result.errors) {
+              serverErrors = serverErrors.concat(result.errors);
+            }
           } else {
             totalFailed += encryptedBatch.length;
+            if (result.error) {
+              serverErrors.push(result.error);
+            }
           }
         }
 
@@ -406,6 +420,15 @@
         const pct = Math.round(((i + batch.length) / selected.length) * 100);
         els.progressBar.style.width = pct + '%';
         els.progressText.textContent = `Importing... ${i + batch.length}/${selected.length}`;
+      }
+
+      let errorHtml = '';
+      if (serverErrors.length > 0) {
+        const uniqueErrors = Array.from(new Set(serverErrors)).slice(0, 5);
+        errorHtml = `<div class="alert alert-error" style="margin-top:12px;font-size:0.8rem;text-align:left;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);color:#fca5a5;padding:10px;border-radius:6px;width:100%;box-sizing:border-box;">
+          <strong>Database Errors:</strong><br>
+          ${uniqueErrors.map(err => esc(err)).join('<br>')}
+        </div>`;
       }
 
       // Show result
@@ -419,6 +442,7 @@
           <div class="info-item"><span>Failed:</span><strong style="color:${totalFailed > 0 ? '#dc2626' : 'inherit'};">${totalFailed}</strong></div>
           <div class="info-item"><span>Source:</span><strong>${esc(selectedSource)}</strong></div>
         </div>
+        ${errorHtml}
       `;
 
       // Clear sensitive data

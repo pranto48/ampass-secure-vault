@@ -343,6 +343,7 @@ class VaultApiController {
         $imported = 0;
         $skipped = 0;
         $failed = 0;
+        $failedErrors = [];
 
         Database::beginTransaction();
         try {
@@ -373,6 +374,7 @@ class VaultApiController {
                     $imported++;
                 } catch (\Exception $e) {
                     $failed++;
+                    $failedErrors[] = $e->getMessage();
                 }
             }
 
@@ -400,7 +402,8 @@ class VaultApiController {
                 'imported' => $imported,
                 'skipped' => $skipped,
                 'failed' => $failed,
-                'total' => count($items)
+                'total' => count($items),
+                'errors' => array_slice(array_unique($failedErrors), 0, 5)
             ]);
 
         } catch (\Exception $e) {
