@@ -329,11 +329,16 @@ class VaultApiController {
 
         $allowedTypes = ['login', 'app_account', 'remote_desktop', 'secure_note', 'identity', 'payment_card', 'wifi', 'server_ssh', 'software_license', 'bank_account', 'custom'];
 
-        // Record import start
-        $importId = Database::insert(
-            "INSERT INTO import_history (user_id, source, item_count_total, status, created_at) VALUES (?, ?, ?, 'started', NOW())",
-            [$this->userId, $source, count($items)]
-        );
+        // Record import start (bypassed if migration not run yet)
+        $importId = null;
+        try {
+            $importId = Database::insert(
+                "INSERT INTO import_history (user_id, source, item_count_total, status, created_at) VALUES (?, ?, ?, 'started', NOW())",
+                [$this->userId, $source, count($items)]
+            );
+        } catch (\Exception $e) {
+            error_log("AMPass import history logging bypassed: " . $e->getMessage());
+        }
 
         $imported = 0;
         $skipped = 0;
@@ -374,10 +379,16 @@ class VaultApiController {
             Database::commit();
 
             // Update import history
-            Database::execute(
-                "UPDATE import_history SET status = 'completed', item_count_imported = ?, item_count_skipped = ?, item_count_failed = ?, completed_at = NOW() WHERE id = ?",
-                [$imported, $skipped, $failed, $importId]
-            );
+            if ($importId !== null) {
+                try {
+                    Database::execute(
+                        "UPDATE import_history SET status = 'completed', item_count_imported = ?, item_count_skipped = ?, item_count_failed = ?, completed_at = NOW() WHERE id = ?",
+                        [$imported, $skipped, $failed, $importId]
+                    );
+                } catch (\Exception $e) {
+                    error_log("AMPass import history update failed: " . $e->getMessage());
+                }
+            }
 
             AuditLog::log('bulk_import_completed', $this->userId, null, null, [
                 'source' => $source, 'imported' => $imported, 'skipped' => $skipped, 'failed' => $failed
@@ -394,9 +405,13 @@ class VaultApiController {
 
         } catch (\Exception $e) {
             Database::rollback();
-            Database::execute("UPDATE import_history SET status = 'failed' WHERE id = ?", [$importId]);
+            if ($importId !== null) {
+                try {
+                    Database::execute("UPDATE import_history SET status = 'failed' WHERE id = ?", [$importId]);
+                } catch (\Exception $ex) {}
+            }
             http_response_code(500);
-            echo json_encode(['error' => 'Bulk import failed', 'imported' => $imported]);
+            echo json_encode(['error' => 'Bulk import failed: ' . $e->getMessage(), 'imported' => $imported]);
         }
     }
 }
