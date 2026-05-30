@@ -680,8 +680,12 @@ class AdminController {
         $data = [
             'current_version' => UpdateService::getInstalledVersion(),
             'installed_sha' => UpdateService::getSetting('installed_commit_sha', ''),
+            'installed_version_display' => UpdateService::getSetting('installed_version_display', defined('AMPASS_VERSION_DISPLAY') ? AMPASS_VERSION_DISPLAY : ''),
+            'installed_commit_count' => UpdateService::getSetting('installed_commit_count', defined('AMPASS_COMMIT_COUNT') ? (string)AMPASS_COMMIT_COUNT : ''),
             'latest_version' => UpdateService::getSetting('latest_version', ''),
             'latest_sha' => UpdateService::getSetting('latest_commit_sha', ''),
+            'latest_version_display' => UpdateService::getSetting('latest_version_display', ''),
+            'latest_commit_count' => UpdateService::getSetting('latest_commit_count', ''),
             'update_available' => UpdateService::getSetting('update_available', '0') === '1',
             'last_checked' => UpdateService::getSetting('last_update_check_at', 'Never'),
             'commit_message' => UpdateService::getSetting('latest_commit_message', ''),
@@ -709,13 +713,28 @@ class AdminController {
         if (!empty($result['error'])) {
             Session::flash('error', $result['error']);
         } elseif ($result['update_available']) {
+            // Build a precise message using the V1.XX display format
+            $latestDisplay = UpdateService::getSetting('latest_version_display', '');
+            if (empty($latestDisplay) && !empty($result['latest_version'])) {
+                $parts = explode('.', $result['latest_version']);
+                $latestDisplay = 'V1.' . ($parts[1] ?? $result['latest_version']);
+            }
+            $installedDisplay = UpdateService::getSetting('installed_version_display', '');
+            if (empty($installedDisplay) && defined('AMPASS_VERSION_DISPLAY')) {
+                $installedDisplay = AMPASS_VERSION_DISPLAY;
+            }
             $msg = 'Update available: ';
-            if (!empty($result['latest_version']) && $result['latest_version'] !== $result['current_version']) {
-                $msg .= 'v' . $result['latest_version'];
+            if ($installedDisplay && $latestDisplay) {
+                $msg .= $installedDisplay . ' → ' . $latestDisplay;
+            } elseif ($latestDisplay) {
+                $msg .= $latestDisplay;
             } elseif (!empty($result['latest_commit_sha'])) {
                 $msg .= 'new commit ' . substr($result['latest_commit_sha'], 0, 8);
             } else {
                 $msg .= 'new version';
+            }
+            if (!empty($result['latest_commit_sha'])) {
+                $msg .= ' (commit ' . substr($result['latest_commit_sha'], 0, 8) . ')';
             }
             Session::flash('success', $msg);
         } elseif (!empty($result['warning'])) {
