@@ -54,6 +54,8 @@ async function handleMessage(msg, sender) {
       return await getMatches(msg.payload.url);
     case 'GET_ALL_ITEMS':
       return await getAllItems();
+    case 'GET_IDENTITIES':
+      return await getIdentities();
     case 'DECRYPT_ITEM':
       return await decryptItem(msg.payload.id);
     case 'SEARCH':
@@ -404,7 +406,7 @@ async function getAllItems() {
         id: item.id,
         item_type: item.item_type,
         title: decrypted.title || 'Untitled',
-        username: decrypted.username || decrypted.email || '',
+        username: decrypted.username || decrypted.email || (decrypted.first_name ? (decrypted.first_name + ' ' + (decrypted.last_name || '')) : ''),
         url: decrypted.url || '',
         is_favorite: item.is_favorite
       });
@@ -447,6 +449,28 @@ async function getMatches(url) {
 
   updateBadge(matches.length);
   return { success: true, items: matches, count: matches.length };
+}
+
+async function getIdentities() {
+  if (!await Storage.isVaultUnlocked()) {
+    return { success: false, code: 'VAULT_LOCKED', error: 'Vault is locked' };
+  }
+  await ensureVaultItemsLoaded();
+  const vaultKeyHex = await Storage.getVaultKey();
+  const items = [];
+  for (const item of (cachedVaultItems || [])) {
+    if (item.item_type !== 'identity') continue;
+    try {
+      const decrypted = await CryptoClient.decryptItem(item.encrypted_data, item.encryption_iv, vaultKeyHex);
+      items.push({
+        id: item.id,
+        title: decrypted.title || 'Untitled',
+        email: decrypted.email || '',
+        name: decrypted.full_name || (decrypted.first_name ? (decrypted.first_name + ' ' + (decrypted.last_name || '')) : '')
+      });
+    } catch (e) { /* skip */ }
+  }
+  return { success: true, items };
 }
 
 async function decryptItem(id) {

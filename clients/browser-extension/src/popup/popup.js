@@ -339,6 +339,10 @@
     currentDetailMeta = meta;
     currentDetailItem = result.item;
 
+    const isLogin = meta.item_type === 'login' || !meta.item_type;
+    const isIdentity = meta.item_type === 'identity';
+    const isNote = meta.item_type === 'secure_note' || meta.item_type === 'note';
+
     // Populate header
     document.getElementById('detailIcon').textContent = getItemIcon(meta.item_type);
     document.getElementById('detailTitle').textContent = result.item.title || 'Untitled';
@@ -352,7 +356,7 @@
     const usernameRow = document.getElementById('detailUsernameRow');
     const usernameEl = document.getElementById('detailUsername');
     const un = result.item.username || result.item.email || '';
-    if (un) {
+    if (un && isLogin) {
       usernameEl.textContent = un;
       usernameRow.style.display = 'block';
     } else {
@@ -363,7 +367,7 @@
     const passwordRow = document.getElementById('detailPasswordRow');
     const passwordEl = document.getElementById('detailPassword');
     const pw = result.item.password || '';
-    if (pw) {
+    if (pw && isLogin) {
       passwordEl.textContent = '••••••••';
       passwordEl.classList.add('password-dots');
       passwordEl._plaintext = pw;
@@ -378,11 +382,34 @@
 
     // TOTP
     const totpRow = document.getElementById('detailTotpRow');
-    if (result.item.totp_secret) {
+    if (result.item.totp_secret && isLogin) {
       totpRow.style.display = 'block';
       startTotpTimer(result.item.totp_secret);
     } else {
       totpRow.style.display = 'none';
+    }
+
+    // Identity Fields
+    const identityGroup = document.getElementById('detailIdentityGroup');
+    if (isIdentity) {
+      document.getElementById('detailFirstName').textContent = result.item.first_name || '';
+      document.getElementById('detailLastName').textContent = result.item.last_name || '';
+      document.getElementById('detailIdentityEmail').textContent = result.item.email || '';
+      document.getElementById('detailIdentityPhone').textContent = result.item.phone || '';
+      document.getElementById('detailIdentityCompany').textContent = result.item.company || '';
+
+      const addrLines = [
+        result.item.address_line1,
+        result.item.address_line2,
+        [result.item.city, result.item.state, result.item.postcode].filter(Boolean).join(', '),
+        result.item.country
+      ].filter(Boolean).join('\n');
+      document.getElementById('detailAddress').textContent = addrLines || '';
+      document.getElementById('detailDob').textContent = result.item.date_of_birth || '';
+
+      identityGroup.style.display = 'block';
+    } else {
+      identityGroup.style.display = 'none';
     }
 
     // Notes
@@ -395,9 +422,10 @@
       notesRow.style.display = 'none';
     }
 
-    // Autofill button — only show if on a matching site and it's a login
+    // Autofill button — only show if on a matching site (for login) or globally (for identity)
     const autofillBtn = document.getElementById('btnDetailAutofill');
-    autofillBtn.style.display = (isOnCurrentSite && meta.item_type !== 'note' && meta.item_type !== 'secure_note') ? 'inline-flex' : 'none';
+    const canAutofill = isLogin ? isOnCurrentSite : isIdentity;
+    autofillBtn.style.display = (canAutofill) ? 'inline-flex' : 'none';
 
     showView('viewDetail', { showBack: true });
   }
@@ -425,6 +453,19 @@
   document.getElementById('btnCopyTotp').addEventListener('click', async () => {
     const code = document.getElementById('detailTotpCode').textContent;
     if (code && code !== '------') await copyToClipboard(code, '2FA code');
+  });
+
+  // Handle generic identity sub-field copy buttons
+  document.querySelectorAll('.btn-copy-child').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const targetId = btn.dataset.target;
+      const el = document.getElementById(targetId);
+      if (el) {
+        const val = el.textContent || '';
+        await copyToClipboard(val, btn.title.replace('Copy ', ''));
+      }
+    });
   });
 
   document.getElementById('btnDetailAutofill').addEventListener('click', () => {
@@ -503,9 +544,12 @@
     openEditForm(null, { title: '', url: '', username: '', password: '', totp_secret: '', notes: '', item_type: 'secure_note' });
   });
 
+  document.getElementById('btnAddIdentity').addEventListener('click', () => {
+    openEditForm(null, { title: '', notes: '', item_type: 'identity' });
+  });
+
   function openEditForm(meta, item) {
     const isEdit = !!meta;
-    document.getElementById('editFormTitle').textContent = isEdit ? 'Edit Item' : 'Add Login';
     document.getElementById('editItemId').value = meta ? meta.id : '';
     const itemType = (meta?.item_type || item?.item_type || 'login');
     document.getElementById('editItemType').value = itemType;
@@ -519,10 +563,31 @@
 
     // Show/hide fields based on type
     const isNote = itemType === 'secure_note' || itemType === 'note';
-    document.getElementById('editUrlGroup').style.display = isNote ? 'none' : 'flex';
-    document.getElementById('editUsernameGroup').style.display = isNote ? 'none' : 'flex';
-    document.getElementById('editPasswordGroup').style.display = isNote ? 'none' : 'flex';
-    document.getElementById('editTotpGroup').style.display = isNote ? 'none' : 'flex';
+    const isIdentity = itemType === 'identity';
+
+    document.getElementById('editUrlGroup').style.display = isNote || isIdentity ? 'none' : 'flex';
+    document.getElementById('editUsernameGroup').style.display = isNote || isIdentity ? 'none' : 'flex';
+    document.getElementById('editPasswordGroup').style.display = isNote || isIdentity ? 'none' : 'flex';
+    document.getElementById('editTotpGroup').style.display = isNote || isIdentity ? 'none' : 'flex';
+    document.getElementById('editIdentityFields').style.display = isIdentity ? 'block' : 'none';
+
+    if (isIdentity) {
+      document.getElementById('editFormTitle').textContent = isEdit ? 'Edit Identity' : 'Add Identity';
+      document.getElementById('editFirstName').value = item?.first_name || '';
+      document.getElementById('editLastName').value = item?.last_name || '';
+      document.getElementById('editIdentityEmail').value = item?.email || '';
+      document.getElementById('editIdentityPhone').value = item?.phone || '';
+      document.getElementById('editIdentityCompany').value = item?.company || '';
+      document.getElementById('editAddress1').value = item?.address_line1 || '';
+      document.getElementById('editAddress2').value = item?.address_line2 || '';
+      document.getElementById('editCity').value = item?.city || '';
+      document.getElementById('editState').value = item?.state || '';
+      document.getElementById('editPostcode').value = item?.postcode || '';
+      document.getElementById('editCountry').value = item?.country || '';
+      document.getElementById('editDob').value = item?.date_of_birth || '';
+    } else {
+      document.getElementById('editFormTitle').textContent = isEdit ? 'Edit Item' : (isNote ? 'Add Note' : 'Add Login');
+    }
 
     // Update strength bar
     updateEditStrength();
@@ -583,15 +648,29 @@
     const itemData = {
       item_type: itemType,
       title,
-      url: document.getElementById('editUrl').value.trim(),
-      username: document.getElementById('editUsername').value.trim(),
-      password: document.getElementById('editPassword').value,
       notes: document.getElementById('editNotes').value.trim(),
     };
 
-    // Only add totp_secret if non-empty
-    const totpSecret = document.getElementById('editTotp').value.trim();
-    if (totpSecret) itemData.totp_secret = totpSecret;
+    if (itemType === 'login') {
+      itemData.url = document.getElementById('editUrl').value.trim();
+      itemData.username = document.getElementById('editUsername').value.trim();
+      itemData.password = document.getElementById('editPassword').value;
+      const totpSecret = document.getElementById('editTotp').value.trim();
+      if (totpSecret) itemData.totp_secret = totpSecret;
+    } else if (itemType === 'identity') {
+      itemData.first_name = document.getElementById('editFirstName').value.trim();
+      itemData.last_name = document.getElementById('editLastName').value.trim();
+      itemData.email = document.getElementById('editIdentityEmail').value.trim();
+      itemData.phone = document.getElementById('editIdentityPhone').value.trim();
+      itemData.company = document.getElementById('editIdentityCompany').value.trim();
+      itemData.address_line1 = document.getElementById('editAddress1').value.trim();
+      itemData.address_line2 = document.getElementById('editAddress2').value.trim();
+      itemData.city = document.getElementById('editCity').value.trim();
+      itemData.state = document.getElementById('editState').value.trim();
+      itemData.postcode = document.getElementById('editPostcode').value.trim();
+      itemData.country = document.getElementById('editCountry').value.trim();
+      itemData.date_of_birth = document.getElementById('editDob').value;
+    }
 
     btn.disabled = true;
     btn.textContent = 'Saving...';
@@ -634,10 +713,17 @@
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) return;
 
-    chrome.tabs.sendMessage(tab.id, {
-      type: 'AUTOFILL',
-      payload: { username: result.item.username || result.item.email || '', password: result.item.password || '' }
-    });
+    if (result.item.item_type === 'identity') {
+      chrome.tabs.sendMessage(tab.id, {
+        type: 'AUTOFILL_IDENTITY',
+        payload: result.item
+      });
+    } else {
+      chrome.tabs.sendMessage(tab.id, {
+        type: 'AUTOFILL',
+        payload: { username: result.item.username || result.item.email || '', password: result.item.password || '' }
+      });
+    }
 
     // Log usage
     sendMsg('LOG_USAGE', { item_id: id, action: 'autofilled', client_type: 'extension' }).catch(() => {});

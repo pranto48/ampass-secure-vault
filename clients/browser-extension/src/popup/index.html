@@ -113,6 +113,7 @@
       <div class="bottom-actions">
         <button id="btnAddNew" class="btn btn-secondary btn-sm">+ Add Login</button>
         <button id="btnAddNote" class="btn btn-secondary btn-sm">+ Note</button>
+        <button id="btnAddIdentity" class="btn btn-secondary btn-sm">+ Identity</button>
         <button id="btnGenerate" class="btn btn-secondary btn-sm">Generate</button>
       </div>
     </div>
@@ -169,6 +170,75 @@
           </div>
         </div>
 
+        <!-- Identity Fields Group -->
+        <div id="detailIdentityGroup" style="display:none;margin-bottom:10px;">
+          <div class="detail-field-row">
+            <div class="detail-field" style="flex:1;margin-bottom:0;" id="detailFirstNameRow">
+              <span class="detail-field-label">First Name</span>
+              <div class="detail-field-value-row">
+                <span id="detailFirstName" class="detail-field-value"></span>
+                <button class="icon-btn detail-copy-btn btn-copy-child" data-target="detailFirstName" title="Copy first name">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="detail-field" style="flex:1;margin-bottom:0;" id="detailLastNameRow">
+              <span class="detail-field-label">Last Name</span>
+              <div class="detail-field-value-row">
+                <span id="detailLastName" class="detail-field-value"></span>
+                <button class="icon-btn detail-copy-btn btn-copy-child" data-target="detailLastName" title="Copy last name">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="detail-field" id="detailIdentityEmailRow" style="margin-bottom:10px;">
+            <span class="detail-field-label">Email</span>
+            <div class="detail-field-value-row">
+              <span id="detailIdentityEmail" class="detail-field-value"></span>
+              <button class="icon-btn detail-copy-btn btn-copy-child" data-target="detailIdentityEmail" title="Copy email">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="detail-field" id="detailIdentityPhoneRow" style="margin-bottom:10px;">
+            <span class="detail-field-label">Phone</span>
+            <div class="detail-field-value-row">
+              <span id="detailIdentityPhone" class="detail-field-value"></span>
+              <button class="icon-btn detail-copy-btn btn-copy-child" data-target="detailIdentityPhone" title="Copy phone">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="detail-field" id="detailIdentityCompanyRow" style="margin-bottom:10px;">
+            <span class="detail-field-label">Company</span>
+            <div class="detail-field-value-row">
+              <span id="detailIdentityCompany" class="detail-field-value"></span>
+              <button class="icon-btn detail-copy-btn btn-copy-child" data-target="detailIdentityCompany" title="Copy company">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="detail-field" id="detailAddressRow" style="margin-bottom:10px;">
+            <span class="detail-field-label">Address</span>
+            <div class="detail-field-value-row">
+              <span id="detailAddress" class="detail-field-value" style="white-space:pre-line;"></span>
+              <button class="icon-btn detail-copy-btn btn-copy-child" data-target="detailAddress" title="Copy address">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="detail-field" id="detailDobRow" style="margin-bottom:10px;">
+            <span class="detail-field-label">Date of Birth</span>
+            <div class="detail-field-value-row">
+              <span id="detailDob" class="detail-field-value"></span>
+              <button class="icon-btn detail-copy-btn btn-copy-child" data-target="detailDob" title="Copy date of birth">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
         <!-- Notes -->
         <div class="detail-field" id="detailNotesRow" style="display:none;">
           <span class="detail-field-label">Notes</span>
@@ -219,6 +289,64 @@
         <input type="text" id="editTotp" class="input mono" placeholder="JBSWY3DPEHPK3PXP" autocomplete="off" spellcheck="false">
         <span class="form-hint">Base32 key from the site's 2FA setup</span>
       </div>
+      <!-- Identity Fields Container -->
+      <div id="editIdentityFields" style="display:none;margin-bottom:9px;">
+        <div class="form-row">
+          <div class="form-group" style="flex:1;">
+            <label class="form-label">First Name</label>
+            <input type="text" id="editFirstName" class="input" placeholder="John" autocomplete="off">
+          </div>
+          <div class="form-group" style="flex:1;">
+            <label class="form-label">Last Name</label>
+            <input type="text" id="editLastName" class="input" placeholder="Doe" autocomplete="off">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Email</label>
+          <input type="email" id="editIdentityEmail" class="input" placeholder="john.doe@example.com" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Phone</label>
+          <input type="tel" id="editIdentityPhone" class="input" placeholder="+1 (555) 019-2834" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Company</label>
+          <input type="text" id="editIdentityCompany" class="input" placeholder="Acme Corp" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Address Line 1</label>
+          <input type="text" id="editAddress1" class="input" placeholder="123 Main St" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Address Line 2</label>
+          <input type="text" id="editAddress2" class="input" placeholder="Apt 4B" autocomplete="off">
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="flex:1;">
+            <label class="form-label">City</label>
+            <input type="text" id="editCity" class="input" placeholder="New York" autocomplete="off">
+          </div>
+          <div class="form-group" style="flex:1;">
+            <label class="form-label">State / Region</label>
+            <input type="text" id="editState" class="input" placeholder="NY" autocomplete="off">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="flex:1;">
+            <label class="form-label">Post Code</label>
+            <input type="text" id="editPostcode" class="input" placeholder="10001" autocomplete="off">
+          </div>
+          <div class="form-group" style="flex:1;">
+            <label class="form-label">Country</label>
+            <input type="text" id="editCountry" class="input" placeholder="United States" autocomplete="off">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Date of Birth</label>
+          <input type="date" id="editDob" class="input" autocomplete="off">
+        </div>
+      </div>
+
       <div class="form-group" id="editNotesGroup">
         <label class="form-label">Notes (optional)</label>
         <textarea id="editNotes" class="input edit-notes" rows="2" placeholder="Any extra info..."></textarea>

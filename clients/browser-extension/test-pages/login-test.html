@@ -126,6 +126,66 @@
         <div class="result" id="result4"></div>
       </form>
     </div>
+
+    <!-- Test 5: Identity / Checkout Form -->
+    <div class="card">
+      <h2>Test 5: Identity & Address Form</h2>
+      <p style="font-size:0.82rem;color:#64748b;margin-bottom:12px;">
+        Test identity autofill here. Create an identity item in the extension popup first.
+      </p>
+      <form id="identityForm" action="#" method="post">
+        <div style="display:flex;gap:12px;margin-bottom:14px;">
+          <div style="flex:1;">
+            <label for="firstName">First Name</label>
+            <input type="text" id="firstName" name="first_name" placeholder="John" autocomplete="given-name">
+          </div>
+          <div style="flex:1;">
+            <label for="lastName">Last Name</label>
+            <input type="text" id="lastName" name="last_name" placeholder="Doe" autocomplete="family-name">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="emailAddr">Email</label>
+          <input type="email" id="emailAddr" name="email" placeholder="john.doe@example.com" autocomplete="email">
+        </div>
+        <div class="form-group">
+          <label for="phoneNum">Phone</label>
+          <input type="text" id="phoneNum" name="phone" placeholder="+1 (555) 123-4567" autocomplete="tel">
+        </div>
+        <div class="form-group">
+          <label for="companyName">Company</label>
+          <input type="text" id="companyName" name="company" placeholder="Acme Corp" autocomplete="organization">
+        </div>
+        <div class="form-group">
+          <label for="address1">Address Line 1</label>
+          <input type="text" id="address1" name="address1" placeholder="123 Main St" autocomplete="street-address">
+        </div>
+        <div class="form-group">
+          <label for="city">City</label>
+          <input type="text" id="city" name="city" placeholder="New York" autocomplete="address-level2">
+        </div>
+        <div style="display:flex;gap:12px;margin-bottom:14px;">
+          <div style="flex:1;">
+            <label for="zipCode">Zip/Postal Code</label>
+            <input type="text" id="zipCode" name="zip" placeholder="10001" autocomplete="postal-code">
+          </div>
+          <div style="flex:1;">
+            <label for="country">Country</label>
+            <select id="country" name="country" autocomplete="country" style="width: 100%; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; outline: none; transition: border-color 0.15s; background: white; color: #1e293b;">
+              <option value="">Select country...</option>
+              <option value="United States">United States</option>
+              <option value="Canada">Canada</option>
+              <option value="United Kingdom">United Kingdom</option>
+              <option value="Germany">Germany</option>
+              <option value="France">France</option>
+              <option value="Bangladesh">Bangladesh</option>
+            </select>
+          </div>
+        </div>
+        <button type="submit">Submit Identity Details</button>
+        <div class="result" id="result5"></div>
+      </form>
+    </div>
   </div>
 
   <script>

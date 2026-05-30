@@ -62,6 +62,112 @@
     return indicators.some(ind => attrs.includes(ind));
   }
 
+  const FIELD_PATTERNS = {
+    first_name: {
+      autocomplete: ['given-name'],
+      attributes: [/first[_-]?name/i, /^fname$/i, /given[_-]?name/i]
+    },
+    last_name: {
+      autocomplete: ['family-name'],
+      attributes: [/last[_-]?name/i, /^lname$/i, /family[_-]?name/i, /surname/i]
+    },
+    full_name: {
+      autocomplete: ['name'],
+      attributes: [/\bname\b/i, /full[_-]?name/i]
+    },
+    email: {
+      types: ['email'],
+      autocomplete: ['email'],
+      attributes: [/\bemail\b/i, /\be-mail\b/i]
+    },
+    phone: {
+      types: ['tel'],
+      autocomplete: ['tel', 'tel-national'],
+      attributes: [/phone/i, /telephone/i, /^tel$/i, /mobile/i, /cell/i]
+    },
+    company: {
+      autocomplete: ['organization'],
+      attributes: [/company/i, /organization/i, /^org$/i]
+    },
+    address_line1: {
+      autocomplete: ['address-line1', 'street-address'],
+      attributes: [/address[_-]?line1/i, /street[_-]?address/i, /address1/i, /\bstreet\b/i, /addr1/i]
+    },
+    address_line2: {
+      autocomplete: ['address-line2'],
+      attributes: [/address[_-]?line2/i, /address2/i, /street2/i, /suite/i, /apt/i, /apartment/i]
+    },
+    city: {
+      autocomplete: ['address-level2'],
+      attributes: [/city/i, /town/i, /locality/i]
+    },
+    state: {
+      autocomplete: ['address-level1'],
+      attributes: [/state/i, /region/i, /province/i, /county/i]
+    },
+    postcode: {
+      autocomplete: ['postal-code'],
+      attributes: [/zip/i, /postcode/i, /postal/i, /post[_-]?code/i]
+    },
+    country: {
+      autocomplete: ['country', 'country-name'],
+      attributes: [/country/i]
+    },
+    date_of_birth: {
+      autocomplete: ['bday'],
+      attributes: [/dob/i, /birthday/i, /birth[_-]?date/i]
+    }
+  };
+
+  function getLabelText(input) {
+    if (input.id) {
+      const label = document.querySelector(`label[for="${input.id}"]`);
+      if (label) return label.textContent;
+    }
+    const parentLabel = input.closest('label');
+    if (parentLabel) return parentLabel.textContent;
+    return '';
+  }
+
+  function classifyField(input) {
+    if (input.type === 'password' || isHidden(input) || !isVisible(input)) return null;
+
+    const autocomplete = (input.getAttribute('autocomplete') || '').toLowerCase().trim();
+    if (autocomplete) {
+      for (const [key, pattern] of Object.entries(FIELD_PATTERNS)) {
+        if (pattern.autocomplete.includes(autocomplete)) {
+          return key;
+        }
+      }
+    }
+
+    const labelText = getLabelText(input).toLowerCase();
+    const attributesText = [
+      input.name,
+      input.id,
+      input.placeholder,
+      input.getAttribute('aria-label'),
+      input.getAttribute('title')
+    ].filter(Boolean).join(' ').toLowerCase();
+
+    const combinedText = attributesText + ' ' + labelText;
+
+    for (const [key, pattern] of Object.entries(FIELD_PATTERNS)) {
+      if (pattern.types && pattern.types.includes(input.type)) {
+        return key;
+      }
+      for (const regex of pattern.attributes) {
+        if (regex.test(combinedText)) {
+          return key;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  window.__ampassClassifyField = classifyField;
+
   /**
    * Check if element is visible
    */
@@ -84,37 +190,37 @@
   }
 
   /**
-   * Detect login forms and notify service worker
+   * Detect login and identity forms and notify service worker
    */
   function detectForms() {
     const passwordFields = findPasswordFields();
-    if (passwordFields.length === 0) return;
-
-    const forms = [];
-
+    
     passwordFields.forEach(pwField => {
       pwField.setAttribute(AMPASS_ATTR, 'true');
       const usernameField = findUsernameField(pwField);
 
       const formData = {
+        type: 'login',
         passwordField: pwField,
         usernameField: usernameField,
         form: pwField.closest('form')
       };
 
-      forms.push(formData);
+      detectedForms.push(formData);
 
       // Add AMPass icon indicator to password field
-      addFieldIndicator(pwField);
+      addFieldIndicator(pwField, formData);
       if (usernameField) {
         usernameField.setAttribute(AMPASS_ATTR, 'true');
       }
     });
 
-    detectedForms = forms;
+    // Detect identity fields/forms
+    detectIdentityForms();
 
-    // Notify service worker about detected forms
-    if (forms.length > 0) {
+    // Notify service worker about detected login forms
+    const loginForms = detectedForms.filter(f => f.type === 'login' || !f.type);
+    if (loginForms.length > 0) {
       chrome.runtime.sendMessage({
         type: 'GET_MATCHES',
         payload: { url: window.location.href }
@@ -123,16 +229,84 @@
   }
 
   /**
+   * Scan page for identity and address forms
+   */
+  function detectIdentityForms() {
+    // Find all visible input/select elements that don't have AMPASS_ATTR
+    const inputs = Array.from(document.querySelectorAll('input:not([type="password"]):not([type="hidden"]):not([type="submit"]):not([type="button"]), select'))
+      .filter(el => !el.hasAttribute(AMPASS_ATTR) && isVisible(el) && !isHidden(el));
+
+    // Group elements by their form or closest common section container
+    const groups = new Map();
+    inputs.forEach(input => {
+      const container = input.closest('form') || input.closest('fieldset') || input.closest('[role="form"]') || input.closest('div') || document.body;
+      if (!groups.has(container)) {
+        groups.set(container, []);
+      }
+      groups.get(container).push(input);
+    });
+
+    // Process each group
+    for (const [container, fields] of groups.entries()) {
+      const classifiedFields = {};
+      let fieldCount = 0;
+
+      fields.forEach(field => {
+        const fieldType = classifyField(field);
+        if (fieldType) {
+          classifiedFields[fieldType] = field;
+          fieldCount++;
+        }
+      });
+
+      // If we find 2 or more distinct identity fields, classify it as an identity form
+      if (fieldCount >= 2) {
+        const identityFormData = {
+          type: 'identity',
+          fields: classifiedFields,
+          form: container
+        };
+        detectedForms.push(identityFormData);
+
+        // Add indicator to the primary field or first field
+        const primaryTypes = ['full_name', 'first_name', 'email'];
+        let primaryField = null;
+        for (const type of primaryTypes) {
+          if (classifiedFields[type]) {
+            primaryField = classifiedFields[type];
+            break;
+          }
+        }
+        if (!primaryField) {
+          const keys = Object.keys(classifiedFields);
+          primaryField = classifiedFields[keys[0]];
+        }
+
+        if (primaryField) {
+          primaryField.setAttribute(AMPASS_ATTR, 'true');
+          addFieldIndicator(primaryField, identityFormData);
+        }
+
+        // Mark other fields as detected too
+        Object.values(classifiedFields).forEach(field => {
+          field.setAttribute(AMPASS_ATTR, 'true');
+        });
+      }
+    }
+  }
+
+  /**
    * Add a small AMPass icon overlay near a password field.
    * Uses fixed positioning to avoid CSS conflicts with the page.
    * Clicking the icon triggers autofill flow with dropdown support.
    */
-  function addFieldIndicator(field) {
+  function addFieldIndicator(field, providedFormData = null) {
     if (field.hasAttribute('data-ampass-icon-added')) return;
     field.setAttribute('data-ampass-icon-added', 'true');
 
     // Find the associated form data for this specific field
-    const formData = detectedForms.find(f => f.passwordField === field) || {
+    const formData = providedFormData || detectedForms.find(f => f.passwordField === field || (f.fields && Object.values(f.fields).includes(field))) || {
+      type: 'login',
       passwordField: field,
       usernameField: findUsernameField(field),
       form: field.closest('form')
@@ -208,12 +382,157 @@
           return;
         }
         // HTTP allowed — proceed
-        fetchMatchesAndFill(icon, formData);
+        if (formData.type === 'identity') {
+          fetchIdentityMatchesAndFill(icon, formData);
+        } else {
+          fetchMatchesAndFill(icon, formData);
+        }
       });
       return;
     }
 
-    fetchMatchesAndFill(icon, formData);
+    if (formData.type === 'identity') {
+      fetchIdentityMatchesAndFill(icon, formData);
+    } else {
+      fetchMatchesAndFill(icon, formData);
+    }
+  }
+
+  /**
+   * Fetch identity matches and show dropdown or fill directly
+   */
+  function fetchIdentityMatchesAndFill(icon, formData) {
+    chrome.runtime.sendMessage({
+      type: 'GET_IDENTITIES'
+    }).then(response => {
+      if (!response) {
+        showAmpassInlineMessage(icon, 'Could not connect to AMPass.', 'Open AMPass');
+        return;
+      }
+
+      if (response.code === 'VAULT_LOCKED' || (!response.success && response.code === 'VAULT_LOCKED')) {
+        showAmpassInlineMessage(icon, 'Unlock AMPass to autofill', 'Open AMPass');
+        return;
+      }
+
+      if (!response.success) {
+        showAmpassInlineMessage(icon, response.error || 'AMPass error', null);
+        return;
+      }
+
+      const matches = response.items || [];
+
+      if (matches.length === 0) {
+        showAmpassInlineMessage(icon, 'No saved identities found', 'Open AMPass');
+        return;
+      }
+
+      if (matches.length === 1) {
+        fillSingleIdentityMatch(matches[0], formData);
+        return;
+      }
+
+      showIdentityDropdown(icon, matches, formData);
+    }).catch(() => {
+      showAmpassInlineMessage(icon, 'Could not connect to AMPass.', null);
+    });
+  }
+
+  /**
+   * Fill a single identity profile match
+   */
+  function fillSingleIdentityMatch(match, formData) {
+    chrome.runtime.sendMessage({
+      type: 'DECRYPT_ITEM',
+      payload: { id: match.id }
+    }).then(response => {
+      if (!response || !response.success || !response.item) {
+        showAmpassToast('Could not decrypt this item', 'error');
+        return;
+      }
+
+      const item = response.item;
+      if (window.__ampassAutofillIdentity) {
+        window.__ampassAutofillIdentity(item, formData);
+        showAmpassToast('Filled by AMPass', 'success');
+
+        chrome.runtime.sendMessage({
+          type: 'LOG_USAGE',
+          payload: { item_id: match.id, action: 'autofilled', client_type: 'extension' }
+        }).catch(() => {});
+      } else {
+        showAmpassToast('Autofill script not loaded', 'error');
+      }
+    }).catch(() => {
+      showAmpassToast('Could not decrypt this item', 'error');
+    });
+  }
+
+  /**
+   * Render dropdown for matching identities
+   */
+  function showIdentityDropdown(icon, matches, formData) {
+    removeAmpassDropdown();
+
+    const dropdown = document.createElement('div');
+    dropdown.id = 'ampass-credential-dropdown';
+    dropdown.style.cssText = `
+      position: fixed; z-index: 2147483647;
+      background: #18181b; border: 1px solid #27272a; border-radius: 10px;
+      padding: 6px 0; min-width: 260px; max-width: 340px; max-height: 280px; overflow-y: auto;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      color: #fafafa; font-size: 13px;
+    `;
+
+    const header = document.createElement('div');
+    header.style.cssText = 'padding:8px 14px 6px;font-size:11px;color:#71717a;text-transform:uppercase;letter-spacing:0.5px;';
+    header.textContent = 'Choose identity (' + matches.length + ')';
+    dropdown.appendChild(header);
+
+    matches.forEach(match => {
+      const item = document.createElement('div');
+      item.style.cssText = 'padding:8px 14px;cursor:pointer;display:flex;flex-direction:column;gap:1px;transition:background 0.15s;';
+      item.innerHTML = `
+        <span style="font-weight:500;color:#fafafa;font-size:13px;">🪪 ${escHtml(match.title || 'Untitled')}</span>
+        <span style="font-size:11px;color:#a1a1aa;">${escHtml(match.name || match.email || '')}</span>
+      `;
+      item.addEventListener('mouseenter', () => item.style.background = '#27272a');
+      item.addEventListener('mouseleave', () => item.style.background = 'transparent');
+      item.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        removeAmpassDropdown();
+        fillSingleIdentityMatch(match, formData);
+      });
+      dropdown.appendChild(item);
+    });
+
+    document.body.appendChild(dropdown);
+
+    const iconRect = icon.getBoundingClientRect();
+    dropdown.style.top = (iconRect.bottom + 4) + 'px';
+    dropdown.style.left = Math.max(8, iconRect.right - 280) + 'px';
+
+    requestAnimationFrame(() => {
+      const ddRect = dropdown.getBoundingClientRect();
+      if (ddRect.bottom > window.innerHeight - 10) {
+        dropdown.style.top = (iconRect.top - ddRect.height - 4) + 'px';
+      }
+      if (ddRect.right > window.innerWidth - 10) {
+        dropdown.style.left = (window.innerWidth - ddRect.width - 10) + 'px';
+      }
+    });
+
+    function closeHandler(e) {
+      if (!dropdown.contains(e.target) && e.target !== icon) {
+        removeAmpassDropdown();
+        document.removeEventListener('click', closeHandler, true);
+      }
+    }
+    setTimeout(() => {
+      document.addEventListener('click', closeHandler, true);
+    }, 50);
   }
 
   /**
