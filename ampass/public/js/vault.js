@@ -139,22 +139,10 @@
                 'This will download an encrypted backup of your entire vault. The backup file contains your encrypted data and can only be restored with your master password.',
                 async () => {
                     try {
-                        let response = await fetch(window.AMPass.baseUrl + '/api/vault/export', {
-                            headers: { 'X-CSRF-TOKEN': window.AMPass.csrfToken }
+                        const response = await AMPassAPI.request('/api/vault/export', {
+                            method: 'GET',
+                            rawResponse: true
                         });
-                        if (response.status === 403) {
-                            if (typeof AMPassCrypto !== 'undefined') {
-                                const unlocked = await AMPassCrypto.ensureVaultKeyUnlocked();
-                                if (unlocked) {
-                                    response = await fetch(window.AMPass.baseUrl + '/api/vault/export', {
-                                        headers: { 'X-CSRF-TOKEN': window.AMPass.csrfToken }
-                                    });
-                                }
-                            }
-                        }
-                        if (!response.ok) {
-                            throw new Error('Export failed');
-                        }
                         const blob = await response.blob();
                         const url = URL.createObjectURL(blob);
                         const a = document.createElement('a');
@@ -164,7 +152,7 @@
                         URL.revokeObjectURL(url);
                         AMPassToast.success('Backup exported successfully');
                     } catch (err) {
-                        AMPassToast.error('Export failed');
+                        AMPassToast.error('Export failed: ' + err.message);
                     }
                 },
                 { type: 'primary', confirmText: 'Export Backup' }

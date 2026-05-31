@@ -242,7 +242,14 @@
             // Notify server
             try {
                 const baseUrl = (window.AMPass && window.AMPass.baseUrl) || '';
-                await fetch(baseUrl + '/api/auth/lock', { method: 'POST' });
+                const csrfToken = (window.AMPass && window.AMPass.csrfToken) || '';
+                await fetch(baseUrl + '/api/auth/lock', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': csrfToken
+                    }
+                });
             } catch (e) {}
             window.location.href = ((window.AMPass && window.AMPass.baseUrl) || '') + '/unlock';
         }
@@ -320,42 +327,88 @@
     window.AMPassAPI = {
         async request(endpoint, options = {}) {
             const baseUrl = (window.AMPass && window.AMPass.baseUrl) || '';
-            const csrfToken = (window.AMPass && window.AMPass.csrfToken) || '';
             const url = baseUrl + endpoint;
-            const defaults = {
-                headers: {
+            
+            // Ensure we use the latest token on every attempt
+            const getHeaders = () => {
+                const currentCsrfToken = (window.AMPass && window.AMPass.csrfToken) || '';
+                return {
                     'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': csrfToken
-                }
+                    'X-CSRF-TOKEN': currentCsrfToken,
+                    ...(options.headers || {})
+                };
             };
 
-            const config = { ...defaults, ...options };
-            if (options.body && typeof options.body === 'object') {
+            const config = { ...options };
+            if (options.body && typeof options.body === 'object' && !(options.body instanceof Blob) && !(options.body instanceof FormData)) {
                 config.body = JSON.stringify(options.body);
             }
 
-            let response = await fetch(url, config);
-            let data = await response.json();
+            let attempt = 0;
+            const maxAttempts = 3;
 
-            if (response.status === 403 && data && data.error === 'Vault is locked') {
-                if (typeof AMPassCrypto !== 'undefined') {
-                    const unlocked = await AMPassCrypto.ensureVaultKeyUnlocked();
-                    if (unlocked) {
-                        // Update CSRF token from window if it was refreshed during unlock
-                        if (window.AMPass && window.AMPass.csrfToken) {
-                            config.headers['X-CSRF-TOKEN'] = window.AMPass.csrfToken;
-                        }
-                        response = await fetch(url, config);
-                        data = await response.json();
+            while (attempt < maxAttempts) {
+                config.headers = getHeaders();
+                attempt++;
+
+                let response;
+                try {
+                    response = await fetch(url, config);
+                } catch (fetchErr) {
+                    if (attempt >= maxAttempts) {
+                        throw fetchErr;
+                    }
+                    continue;
+                }
+
+                if (response.ok) {
+                    if (options.rawResponse) {
+                        return response;
+                    }
+                    try {
+                        return await response.json();
+                    } catch (e) {
+                        return null;
                     }
                 }
-            }
 
-            if (!response.ok) {
-                throw new Error(data.error || 'Request failed');
-            }
+                // If we get here, response is not OK (e.g. status 403, 500, etc.)
+                let data = null;
+                try {
+                    const clone = response.clone();
+                    data = await clone.json();
+                } catch (e) {}
 
-            return data;
+                if (response.status === 403 && data) {
+                    // Case 1: Vault is locked
+                    if (data.error === 'Vault is locked') {
+                        if (typeof AMPassCrypto !== 'undefined') {
+                            const unlocked = await AMPassCrypto.ensureVaultKeyUnlocked();
+                            if (unlocked) {
+                                continue;
+                            }
+                        }
+                    }
+
+                    // Case 2: Invalid CSRF token
+                    if (data.code === 'CSRF_INVALID' || (data.error && data.error.includes('Invalid security token'))) {
+                        try {
+                            const csrfResp = await fetch(baseUrl + '/api/auth/csrfToken');
+                            const csrfData = await csrfResp.json();
+                            if (csrfResp.ok && csrfData.success && csrfData.csrf_token) {
+                                if (window.AMPass) {
+                                    window.AMPass.csrfToken = csrfData.csrf_token;
+                                }
+                                continue;
+                            }
+                        } catch (csrfErr) {
+                            console.warn('Failed to refresh CSRF token:', csrfErr);
+                        }
+                    }
+                }
+
+                throw new Error((data && data.error) || 'Request failed');
+            }
         },
 
         get(endpoint) {

@@ -65,25 +65,12 @@
         // Encrypt the vault key
         const encrypted = await AMPassCrypto.encrypt(vaultKeyRaw, wrappingKey);
 
-        // Send encrypted vault key to server
-        const response = await fetch(window.AMPass.baseUrl + '/api/auth/initVaultKey', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-TOKEN': window.AMPass.csrfToken || ''
-            },
-            body: JSON.stringify({
-                encryption_salt: salt,
-                encrypted_vault_key: encrypted.ciphertext,
-                vault_key_iv: encrypted.iv,
-                key_iterations: iterations
-            })
+        const result = await AMPassAPI.post('/api/auth/initVaultKey', {
+            encryption_salt: salt,
+            encrypted_vault_key: encrypted.ciphertext,
+            vault_key_iv: encrypted.iv,
+            key_iterations: iterations
         });
-
-        const result = await response.json();
-        if (!response.ok || !result.success) {
-            throw new Error(result.error || 'Failed to save vault key');
-        }
 
         // Now unlock with the new params
         const newParams = {
