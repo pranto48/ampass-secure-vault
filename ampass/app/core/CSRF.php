@@ -25,19 +25,33 @@ class CSRF {
         return '<input type="hidden" name="csrf_token" value="' . htmlspecialchars($token, ENT_QUOTES, 'UTF-8') . '">';
     }
 
-    /**
-     * Validate CSRF token from request
-     */
     public static function validate(?string $token = null): bool {
-        if ($token === null) {
+        if ($token === null || $token === '') {
             $token = $_POST['csrf_token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
+
+            // Fallback: check raw JSON body
+            if (empty($token)) {
+                $rawInput = file_get_contents('php://input');
+                if (!empty($rawInput)) {
+                    $json = json_decode($rawInput, true);
+                    if ($json && isset($json['csrf_token'])) {
+                        $token = $json['csrf_token'];
+                    }
+                }
+            }
         }
 
-        if (empty($token) || empty($_SESSION['csrf_token'])) {
-            return false;
+        $sessionToken = $_SESSION['csrf_token'] ?? '';
+        $isValid = false;
+        if (!empty($token) && !empty($sessionToken)) {
+            $isValid = hash_equals($sessionToken, $token);
         }
 
-        return hash_equals($_SESSION['csrf_token'], $token);
+        // Log validation attempt
+        $logMsg = date('Y-m-d H:i:s') . " - CSRF Validate. Req: '$token', Session: '$sessionToken', Valid: " . ($isValid ? 'true' : 'false') . ", URL: " . ($_SERVER['REQUEST_URI'] ?? '') . "\n";
+        @file_put_contents('/tmp/ampass_debug.log', $logMsg, FILE_APPEND);
+
+        return $isValid;
     }
 
     /**

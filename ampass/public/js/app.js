@@ -340,15 +340,20 @@
             };
 
             const config = { ...options };
-            if (options.body && typeof options.body === 'object' && !(options.body instanceof Blob) && !(options.body instanceof FormData)) {
-                config.body = JSON.stringify(options.body);
-            }
 
             let attempt = 0;
             const maxAttempts = 3;
 
             while (attempt < maxAttempts) {
+                const currentCsrfToken = (window.AMPass && window.AMPass.csrfToken) || '';
                 config.headers = getHeaders();
+
+                // Inject the latest CSRF token into the JSON body on every retry attempt
+                if (options.body && typeof options.body === 'object' && !(options.body instanceof Blob) && !(options.body instanceof FormData)) {
+                    const bodyClone = { ...options.body, csrf_token: currentCsrfToken };
+                    config.body = JSON.stringify(bodyClone);
+                }
+
                 attempt++;
 
                 let response;
