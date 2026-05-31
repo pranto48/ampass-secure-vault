@@ -602,6 +602,137 @@ const AMPassCrypto = (function() {
         return activeUnlockPromise;
     }
 
+    /**
+     * Prompt user for master password to verify identity for a sensitive action.
+     * Resolves to true if password is correct, false if cancelled/incorrect.
+     */
+    async function promptConfirmMasterPassword(actionText = 'perform this action') {
+        return new Promise((resolve) => {
+            const modalDiv = document.createElement('div');
+            modalDiv.id = 'ampass-inline-verify-modal';
+            modalDiv.innerHTML = `
+                <div class="modal-overlay show" style="z-index: 9999; display: flex; align-items: center; justify-content: center; position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);">
+                    <div class="modal" style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 28px; max-width: 420px; width: 100%; box-shadow: var(--shadow-xl);">
+                        <div class="modal-title" style="font-size:1.2rem; font-weight:600; margin-bottom:8px; display:flex; align-items:center; gap:8px;">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;color:var(--accent);"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                            Confirm Master Password
+                        </div>
+                        <div class="modal-body" style="font-size:0.86rem; color:var(--text-secondary); line-height:1.6;">
+                            <p style="margin-bottom:16px;">Please enter your master password to <strong>${actionText}</strong>.</p>
+                            <form id="inlineVerifyForm" style="display:block;">
+                                <div class="form-group" style="margin-bottom:16px;">
+                                    <label for="inline_verify_password" class="form-label" style="display:block; margin-bottom:6px; font-weight:550; font-size:0.78rem;">Master Password</label>
+                                    <div class="input-wrapper" style="position:relative; display:flex; align-items:center;">
+                                        <input type="password" id="inline_verify_password" class="form-input" placeholder="Enter your master password" required autofocus style="width:100%; padding:10px 14px; background:var(--bg-input); border:1px solid var(--border); border-radius:var(--radius); color:var(--text);" autocomplete="current-password">
+                                        <button type="button" class="input-toggle-password" id="toggleVerifyPassword" style="position:absolute; right:10px; background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px;">
+                                            <svg class="eye-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:17px;height:17px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                            <svg class="eye-closed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:17px;height:17px;display:none;"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                                        </button>
+                                    </div>
+                                    <div class="alert alert-error" id="inlineVerifyError" style="display:none; margin-top:12px; font-size:0.82rem; padding:10px 12px; border-radius:var(--radius);"></div>
+                                </div>
+                                <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:8px; margin-top:24px;">
+                                    <button type="button" class="btn btn-secondary" id="btnInlineVerifyCancel" style="padding:8px 14px; font-size:0.82rem; border-radius:var(--radius); cursor:pointer; font-weight:550;">Cancel</button>
+                                    <button type="submit" class="btn btn-primary" id="btnInlineVerifySubmit" style="padding:8px 14px; font-size:0.82rem; border-radius:var(--radius); cursor:pointer; font-weight:550; display:inline-flex; align-items:center; gap:6px;">
+                                        <span class="spinner" id="inlineVerifySpinner" style="display:none; width: 14px; height: 14px; border:2px solid var(--border); border-top-color:var(--text-inverse); border-radius:50%; animation:spin 0.7s linear infinite;"></span>
+                                        <span id="btnInlineVerifyText">Confirm</span>
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modalDiv);
+
+            const toggleBtn = modalDiv.querySelector('#toggleVerifyPassword');
+            const passInput = modalDiv.querySelector('#inline_verify_password');
+            const eyeOpen = toggleBtn.querySelector('.eye-open');
+            const eyeClosed = toggleBtn.querySelector('.eye-closed');
+
+            toggleBtn.addEventListener('click', () => {
+                if (passInput.type === 'password') {
+                    passInput.type = 'text';
+                    eyeOpen.style.display = 'none';
+                    eyeClosed.style.display = 'block';
+                } else {
+                    passInput.type = 'password';
+                    eyeOpen.style.display = 'block';
+                    eyeClosed.style.display = 'none';
+                }
+            });
+
+            const form = modalDiv.querySelector('#inlineVerifyForm');
+            const errorDiv = modalDiv.querySelector('#inlineVerifyError');
+            const spinner = modalDiv.querySelector('#inlineVerifySpinner');
+            const btnText = modalDiv.querySelector('#btnInlineVerifyText');
+            const btnSubmit = modalDiv.querySelector('#btnInlineVerifySubmit');
+            const btnCancel = modalDiv.querySelector('#btnInlineVerifyCancel');
+
+            passInput.focus();
+
+            btnCancel.addEventListener('click', () => {
+                modalDiv.remove();
+                resolve(false);
+            });
+
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const password = passInput.value;
+                if (!password) return;
+
+                spinner.style.display = 'inline-block';
+                btnText.textContent = 'Verifying...';
+                btnSubmit.disabled = true;
+                btnCancel.disabled = true;
+                errorDiv.style.display = 'none';
+
+                try {
+                    const baseUrl = (window.AMPass && window.AMPass.baseUrl) || '';
+                    
+                    // Fetch fresh CSRF token
+                    let csrfToken = (window.AMPass && window.AMPass.csrfToken) || '';
+                    try {
+                        const csrfResp = await fetch(baseUrl + '/api/auth/csrfToken?t=' + Date.now());
+                        const csrfData = await csrfResp.json();
+                        if (csrfResp.ok && csrfData.success && csrfData.csrf_token) {
+                            csrfToken = csrfData.csrf_token;
+                            if (window.AMPass) window.AMPass.csrfToken = csrfToken;
+                        }
+                    } catch (e) {}
+
+                    // Verify master password with server
+                    const verifyResp = await fetch(baseUrl + '/api/auth/verify-master', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': csrfToken
+                        },
+                        body: JSON.stringify({ master_password: password })
+                    });
+                    
+                    const verifyData = await verifyResp.json();
+                    if (!verifyResp.ok || !verifyData.success) {
+                        throw new Error(verifyData.error || 'Incorrect master password');
+                    }
+
+                    modalDiv.remove();
+                    resolve(true);
+
+                } catch (err) {
+                    errorDiv.textContent = err.message || 'Invalid master password';
+                    errorDiv.style.display = 'block';
+                    
+                    spinner.style.display = 'none';
+                    btnText.textContent = 'Confirm';
+                    btnSubmit.disabled = false;
+                    btnCancel.disabled = false;
+                    passInput.focus();
+                }
+            });
+        });
+    }
+
     // Public API
     return {
         generateSalt,
@@ -613,6 +744,7 @@ const AMPassCrypto = (function() {
         unlockVault,
         restoreVaultKey,
         ensureVaultKeyUnlocked,
+        promptConfirmMasterPassword,
         lockVault,
         isUnlocked,
         encryptVaultItem,

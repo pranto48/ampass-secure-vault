@@ -124,10 +124,10 @@ $favorites = $favorites ?? [];
                     <span class="vault-item-subtitle" data-decrypt="username">••••••••</span>
                 </div>
                 <div class="vault-item-actions">
-                    <button class="btn-icon btn-copy-username" title="Copy username" data-decrypt-copy="username">
+                    <button class="btn-icon btn-copy-username" title="Copy username" data-action="copy-username">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                     </button>
-                    <button class="btn-icon btn-copy-password" title="Copy password" data-decrypt-copy="password">
+                    <button class="btn-icon btn-copy-password" title="Copy password" data-action="copy-password">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
                     </button>
                 </div>
@@ -156,7 +156,7 @@ $favorites = $favorites ?? [];
                     <span class="vault-item-subtitle" data-decrypt="username">••••••••</span>
                 </div>
                 <div class="vault-item-actions">
-                    <button class="btn-icon btn-copy-password" title="Copy password" data-decrypt-copy="password">
+                    <button class="btn-icon btn-copy-password" title="Copy password" data-action="copy-password">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
                     </button>
                 </div>

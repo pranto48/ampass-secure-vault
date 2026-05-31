@@ -29,7 +29,10 @@
                     break;
 
                 case 'copy-password':
-                    await copyField(encrypted, iv, 'password', 'Password');
+                    const confirmed = await AMPassCrypto.promptConfirmMasterPassword('copy the password');
+                    if (confirmed) {
+                        await copyField(encrypted, iv, 'password', 'Password');
+                    }
                     break;
 
                 case 'launch-url':

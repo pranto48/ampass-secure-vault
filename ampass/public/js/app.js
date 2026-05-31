@@ -502,31 +502,61 @@
     }
 
     /**
-     * Decrypt all visible vault items on the page
+     * Decrypt all visible vault items on the page (lazy decryption using IntersectionObserver)
      */
     async function decryptVisibleItems() {
         const items = document.querySelectorAll('.vault-item[data-encrypted]');
-        for (const item of items) {
-            try {
-                const encrypted = item.getAttribute('data-encrypted');
-                const iv = item.getAttribute('data-iv');
-                if (!encrypted || !iv) continue;
+        if (items.length === 0) return;
 
-                const decrypted = await AMPassCrypto.decryptVaultItem(encrypted, iv);
+        if (typeof IntersectionObserver === 'undefined') {
+            // Fallback for old/unsupported browsers: decrypt in parallel
+            const promises = Array.from(items).map(async (item) => {
+                await decryptSingleItem(item);
+            });
+            await Promise.all(promises);
+            return;
+        }
 
-                // Update title
-                const titleEl = item.querySelector('[data-decrypt="title"]');
-                if (titleEl && decrypted.title) titleEl.textContent = decrypted.title;
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(async (entry) => {
+                if (entry.isIntersecting) {
+                    const item = entry.target;
+                    observer.unobserve(item); // Only decrypt once
+                    await decryptSingleItem(item);
+                }
+            });
+        }, {
+            rootMargin: '150px 0px', // Decrypt slightly before scrolling into viewport
+            threshold: 0.01
+        });
 
-                // Update username/subtitle
-                const usernameEl = item.querySelector('[data-decrypt="username"]');
-                if (usernameEl && decrypted.username) usernameEl.textContent = decrypted.username;
+        items.forEach(item => observer.observe(item));
+    }
 
-            } catch (e) {
-                console.warn('Failed to decrypt item:', e.message);
-            }
+    /**
+     * Decrypt a single vault item and update its DOM elements
+     */
+    async function decryptSingleItem(item) {
+        try {
+            const encrypted = item.getAttribute('data-encrypted');
+            const iv = item.getAttribute('data-iv');
+            if (!encrypted || !iv) return;
+
+            const decrypted = await AMPassCrypto.decryptVaultItem(encrypted, iv);
+
+            // Update title
+            const titleEl = item.querySelector('[data-decrypt="title"]');
+            if (titleEl && decrypted.title) titleEl.textContent = decrypted.title;
+
+            // Update username/subtitle
+            const usernameEl = item.querySelector('[data-decrypt="username"]');
+            if (usernameEl && decrypted.username) usernameEl.textContent = decrypted.username;
+
+        } catch (e) {
+            console.warn('Failed to decrypt item:', e.message);
         }
     }
+
 
     // Expose utilities globally
     window.AMPassToast = Toast;

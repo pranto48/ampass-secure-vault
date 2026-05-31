@@ -82,19 +82,27 @@
 
         // Bind copy buttons
         fields.querySelectorAll('[data-copy-value]').forEach(btn => {
-            btn.addEventListener('click', () => {
+            btn.addEventListener('click', async () => {
                 const value = btn.getAttribute('data-copy-value');
                 const label = btn.getAttribute('data-copy-label') || 'Value';
+                const lowerLabel = label.toLowerCase();
+                if (lowerLabel === 'password' || lowerLabel === 'cvv' || lowerLabel === 'card number') {
+                    const confirmed = await AMPassCrypto.promptConfirmMasterPassword(`copy the ${lowerLabel}`);
+                    if (!confirmed) return;
+                }
                 AMPassClipboard.copy(value, label);
             });
         });
 
         // Bind show/hide password buttons
         fields.querySelectorAll('[data-toggle-reveal]').forEach(btn => {
-            btn.addEventListener('click', () => {
+            btn.addEventListener('click', async () => {
                 const target = btn.closest('.field-value-row').querySelector('.field-display');
                 const realValue = btn.getAttribute('data-toggle-reveal');
                 if (target.textContent === '••••••••••••' || target.textContent === '•••') {
+                    const label = btn.closest('.item-field').querySelector('.field-label').textContent.toLowerCase();
+                    const confirmed = await AMPassCrypto.promptConfirmMasterPassword(`show the ${label}`);
+                    if (!confirmed) return;
                     target.textContent = realValue;
                     btn.textContent = 'Hide';
                 } else {
