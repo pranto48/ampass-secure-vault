@@ -502,35 +502,17 @@
     }
 
     /**
-     * Decrypt all visible vault items on the page (lazy decryption using IntersectionObserver)
+     * Decrypt all vault items on the page in parallel
      */
     async function decryptVisibleItems() {
         const items = document.querySelectorAll('.vault-item[data-encrypted]');
         if (items.length === 0) return;
 
-        if (typeof IntersectionObserver === 'undefined') {
-            // Fallback for old/unsupported browsers: decrypt in parallel
-            const promises = Array.from(items).map(async (item) => {
-                await decryptSingleItem(item);
-            });
-            await Promise.all(promises);
-            return;
-        }
-
-        const observer = new IntersectionObserver((entries) => {
-            entries.forEach(async (entry) => {
-                if (entry.isIntersecting) {
-                    const item = entry.target;
-                    observer.unobserve(item); // Only decrypt once
-                    await decryptSingleItem(item);
-                }
-            });
-        }, {
-            rootMargin: '150px 0px', // Decrypt slightly before scrolling into viewport
-            threshold: 0.01
+        // Decrypt all items in parallel (fast and robust)
+        const promises = Array.from(items).map(async (item) => {
+            await decryptSingleItem(item);
         });
-
-        items.forEach(item => observer.observe(item));
+        await Promise.all(promises);
     }
 
     /**
