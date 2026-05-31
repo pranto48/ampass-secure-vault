@@ -227,9 +227,10 @@
             }
             // Notify server
             try {
-                await fetch(window.AMPass.baseUrl + '/api/auth/lock', { method: 'POST' });
+                const baseUrl = (window.AMPass && window.AMPass.baseUrl) || '';
+                await fetch(baseUrl + '/api/auth/lock', { method: 'POST' });
             } catch (e) {}
-            window.location.href = window.AMPass.baseUrl + '/unlock';
+            window.location.href = ((window.AMPass && window.AMPass.baseUrl) || '') + '/unlock';
         }
     };
 
@@ -304,11 +305,13 @@
     // ===== API Helper =====
     window.AMPassAPI = {
         async request(endpoint, options = {}) {
-            const url = window.AMPass.baseUrl + endpoint;
+            const baseUrl = (window.AMPass && window.AMPass.baseUrl) || '';
+            const csrfToken = (window.AMPass && window.AMPass.csrfToken) || '';
+            const url = baseUrl + endpoint;
             const defaults = {
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': window.AMPass.csrfToken || ''
+                    'X-CSRF-TOKEN': csrfToken
                 }
             };
 

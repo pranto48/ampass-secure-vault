@@ -525,7 +525,10 @@ const AMPassCrypto = (function() {
                 errorDiv.style.display = 'none';
 
                 try {
-                    const paramsResp = await fetch(window.AMPass.baseUrl + '/api/auth/derivation-params');
+                    const baseUrl = (window.AMPass && window.AMPass.baseUrl) || '';
+                    const csrfToken = (window.AMPass && window.AMPass.csrfToken) || '';
+
+                    const paramsResp = await fetch(baseUrl + '/api/auth/derivation-params');
                     const paramsData = await paramsResp.json();
                     if (!paramsResp.ok || !paramsData.success) {
                         throw new Error(paramsData.error || 'Failed to fetch security settings');
@@ -536,11 +539,11 @@ const AMPassCrypto = (function() {
                     await unlockVault(password, params);
 
                     // Call verify-master to verify master password and sync PHP session
-                    const verifyResp = await fetch(window.AMPass.baseUrl + '/api/auth/verify-master', {
+                    const verifyResp = await fetch(baseUrl + '/api/auth/verify-master', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
-                            'X-CSRF-TOKEN': window.AMPass.csrfToken || ''
+                            'X-CSRF-TOKEN': csrfToken
                         },
                         body: JSON.stringify({ master_password: password })
                     });
