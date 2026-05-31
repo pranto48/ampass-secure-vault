@@ -544,7 +544,7 @@ const AMPassCrypto = (function() {
                     // Fetch a fresh CSRF token from the server to guarantee validity (e.g. after idle lockouts)
                     let csrfToken = (window.AMPass && window.AMPass.csrfToken) || '';
                     try {
-                        const csrfResp = await fetch(baseUrl + '/api/auth/csrfToken');
+                        const csrfResp = await fetch(baseUrl + '/api/auth/csrfToken?t=' + Date.now());
                         const csrfData = await csrfResp.json();
                         if (csrfResp.ok && csrfData.success && csrfData.csrf_token) {
                             csrfToken = csrfData.csrf_token;

@@ -379,7 +379,7 @@
                     data = await clone.json();
                 } catch (e) {}
 
-                if (response.status === 403 && data) {
+                if (response.status === 403 && data && attempt < maxAttempts) {
                     // Case 1: Vault is locked
                     if (data.error === 'Vault is locked') {
                         if (typeof AMPassCrypto !== 'undefined') {
@@ -393,7 +393,7 @@
                     // Case 2: Invalid CSRF token
                     if (data.code === 'CSRF_INVALID' || (data.error && data.error.includes('Invalid security token'))) {
                         try {
-                            const csrfResp = await fetch(baseUrl + '/api/auth/csrfToken');
+                            const csrfResp = await fetch(baseUrl + '/api/auth/csrfToken?t=' + Date.now());
                             const csrfData = await csrfResp.json();
                             if (csrfResp.ok && csrfData.success && csrfData.csrf_token) {
                                 if (window.AMPass) {

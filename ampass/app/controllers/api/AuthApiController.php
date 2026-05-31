@@ -29,6 +29,10 @@ class AuthApiController {
      * SECURITY: Only returns token, no sensitive data. Same-origin enforced by CORS.
      */
     public function csrfToken(): void {
+        header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+        header('Cache-Control: post-check=0, pre-check=0', false);
+        header('Pragma: no-cache');
+
         // Regenerate to ensure freshness
         CSRF::regenerate();
         echo json_encode([
